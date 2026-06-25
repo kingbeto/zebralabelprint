@@ -2,6 +2,8 @@
 
 Print `.zpl` label files to your Zebra printer from macOS.
 
+![Zebra Label Print — choose a ZPL file, pick your printer, preview labels, and print](docs/screenshot.png)
+
 ## Requirements
 
 - macOS 13 or later
