@@ -13,7 +13,7 @@ Print ZPL label files to your Zebra printer from macOS. Files can be `.zpl` or `
 
 ## Install
 
-**TL;DR** — Apple silicon Mac (macOS 13+). First, set up your printer the way **Zebra** requires: [install their CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in System Settings (this is not part of installing Zebra Label Print). Then download the [`.dmg` release](https://github.com/kingbeto/zebralabelprint/releases/latest), drag **ZebraLabelPrint.app** to **Applications**, open it, pick a `.zpl` or `.txt` file with ZPL inside, click **Print**.
+**TL;DR** — Apple silicon Mac (macOS 13+). First, set up your printer the way **Zebra** requires: [install their CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in System Settings (this is not part of installing Zebra Label Print). Then download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.1.0/ZebraLabelPrint-arm64.dmg)**, drag **ZebraLabelPrint.app** to **Applications**, open it, pick a `.zpl` or `.txt` file with ZPL inside, click **Print**.
 
 ### 1. Set up your Zebra printer in CUPS (required by Zebra, not this app)
 
@@ -43,7 +43,7 @@ You should see `scheduler is running`.
 
 ### 2. Install Zebra Label Print
 
-Download **`ZebraLabelPrint-arm64.dmg`** from the [latest GitHub release](https://github.com/kingbeto/zebralabelprint/releases/latest), then:
+Download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.1.0/ZebraLabelPrint-arm64.dmg)** (v1.1.0), then:
 
 1. Open the `.dmg` file.
 2. Drag **ZebraLabelPrint.app** to the **Applications** folder.
@@ -56,10 +56,24 @@ For a quick test, you can run the app directly from the mounted disk image — b
 ## How to use
 
 1. Open **Zebra Label Print**.
-2. Choose your label file (`.zpl` or `.txt` — the file picker opens on launch). The content must be ZPL; the extension is only for convenience.
-3. Pick your printer from the dropdown if needed. The app remembers your choice. On first launch it tries to select a printer whose name contains “zebra”.
-4. Check the preview on the right.
-5. Click **Print**.
+2. Review the **setup checklist** at the bottom of the sidebar. It collapses when everything is green; expand it to see details or use **Check again**.
+3. Choose your label file (`.zpl` or `.txt` — the file picker opens on launch). The content must be ZPL; the extension is only for convenience.
+4. Pick your printer from the dropdown if needed. The app remembers your choice. On first launch it tries to select a printer whose name contains “zebra”.
+5. Check the preview on the right.
+6. Click **Print**.
+
+The app shows how many labels will print (including `^PQ` copies and multi-label files). Preview renders only the first label.
+
+## Setup checklist
+
+Before printing, the app checks:
+
+- **CUPS print system** — use the ↻ button to refresh status or restart CUPS (administrator password required if CUPS is down)
+- **Zebra printer in macOS** — driver installed and queue visible to CUPS
+- **Printer selected** — queue chosen in the app
+- **Print queue** — ready, paused, or offline; use **Resume** if the queue is paused
+
+When all checks pass, the checklist collapses to a compact green bar. **Print** stays disabled until a label file is selected and the checklist is clear.
 
 ## Preview
 
@@ -82,8 +96,10 @@ macOS may block the app the first time you open it because it is not signed by A
 ## Troubleshooting
 
 - **No printers listed** — Zebra Label Print only shows queues already in CUPS. Install [Zebra’s CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add your printer in **System Settings → Printers & Scanners**.
+- **Setup checklist stays red** — Expand the checklist for details. Restart CUPS with ↻ if needed, or open **Printer settings** from the help links.
+- **Print succeeds but nothing prints** — The queue may be paused. Expand the checklist and tap **Resume**, or resume the printer in System Settings.
 - **Print fails** — Confirm the printer is connected and has labels loaded. Try printing a test page from System Settings.
-- **No preview** — Check your internet connection. Preview uses an online rendering service.
+- **No preview** — Check your internet connection. Preview uses an online rendering service (Labelary). Wait a moment after moving the offset slider — requests are paced to avoid rate limits.
 - **File won’t open or preview fails** — Make sure the file contains ZPL commands (e.g. `^XA` … `^XZ`), even if it uses a `.txt` extension.
 
 ## For developers
