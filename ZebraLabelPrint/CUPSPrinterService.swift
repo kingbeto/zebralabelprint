@@ -1,5 +1,6 @@
 import Foundation
 
+// thin wrapper around lpstat / lpr — nothing fancy here
 enum CUPSPrinterService {
     enum PrintError: LocalizedError {
         case failed(String)
@@ -13,6 +14,7 @@ enum CUPSPrinterService {
     }
 
     static func printerNames() -> [String] {
+        // queue names from CUPS, not the friendly name in System Settings
         guard let output = runCommand(executable: "/usr/bin/lpstat", arguments: ["-a"]) else {
             return []
         }
@@ -34,6 +36,7 @@ enum CUPSPrinterService {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/lpr")
+        // -l = raw ZPL, dont let CUPS try to be clever
         process.arguments = ["-P", printer, "-l"]
 
         let inputPipe = Pipe()
@@ -44,6 +47,7 @@ enum CUPSPrinterService {
 
         do {
             try process.run()
+            // pipe zpl on stdin — file path approach broke under sandbox
             inputPipe.fileHandleForWriting.write(zplData)
             inputPipe.fileHandleForWriting.closeFile()
             process.waitUntilExit()

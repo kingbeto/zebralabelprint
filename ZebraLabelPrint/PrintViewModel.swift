@@ -29,6 +29,7 @@ final class PrintViewModel: ObservableObject {
     private let lastPrinterKey = "lastSelectedPrinter"
     private let horizontalOffsetKey = "horizontalOffsetMM"
     private let labelSizeKey = "selectedLabelSizeId"
+    // case-insensitive match — queue names are all over the place
     private static let zebraPrinterPattern = try? NSRegularExpression(pattern: "(?i)zebra")
 
     var selectedLabelSize: ZebraLabelSizeOption {
@@ -45,6 +46,7 @@ final class PrintViewModel: ObservableObject {
 
     func onAppear() {
         loadPrinters()
+        // open file picker straight away, thats the whole point of the app
         if selectedFileURL == nil {
             selectFile()
         }
@@ -66,6 +68,7 @@ final class PrintViewModel: ObservableObject {
 
     func schedulePreviewRefresh() {
         offsetPreviewTask?.cancel()
+        // small debounce — slider onChange fires like crazy
         offsetPreviewTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
@@ -98,6 +101,7 @@ final class PrintViewModel: ObservableObject {
             return
         }
 
+        // no saved printer — grab first zebra-ish queue if we can
         if let zebraPrinter = printers.first(where: Self.matchesZebra) {
             selectedPrinter = zebraPrinter
             persistPrinter(zebraPrinter)
@@ -232,6 +236,7 @@ final class PrintViewModel: ObservableObject {
             let labelSize = selectedLabelSize.sizeInches
             previewLabelSizeInches = labelSize
             updatePrintDefinition(for: previewLabels[previewLabelIndex])
+            // cap at 5 labels — labelary gets unhappy with huge batches
             previewImages = try await ZPLPreviewService.renderLabels(
                 zpl: adjustedZPL,
                 printerName: selectedPrinter,

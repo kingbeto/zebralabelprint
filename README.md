@@ -13,11 +13,43 @@ Print `.zpl` label files to your Zebra printer from macOS.
 
 ## Install
 
-Copy **ZebraLabelPrint.app** to your **Applications** folder (`/Applications/`). That is the standard place for macOS apps and keeps it available in Launchpad and Spotlight.
+### 1. Set up the Zebra CUPS driver (required)
 
-For a quick test, you can run it from **Downloads** instead — but move it to Applications when you plan to keep using it.
+Zebra Label Print prints through **CUPS**. Before installing the app, make sure your Zebra printer is set up with the official Zebra CUPS driver.
 
-If you received the app as a download (for example from a GitHub release), do not put the built app inside this source folder. Use Applications on each Mac where you want to run it.
+**Check from Terminal** — you should see at least one Zebra printer queue:
+
+```bash
+lpstat -a | grep -i zebra
+```
+
+Example output when it is set up:
+
+```
+Zebra_Technologies_ZTC_ZD410-203dpi_ZPL accepting requests since ...
+```
+
+If that command prints nothing, CUPS is not ready for Zebra yet. Install the driver and add your printer following [Zebra’s guide to install the CUPS driver on macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false), then add the printer in **System Settings → Printers & Scanners**.
+
+To confirm the CUPS print system itself is running:
+
+```bash
+lpstat -r
+```
+
+You should see `scheduler is running`.
+
+### 2. Install Zebra Label Print
+
+Download **`ZebraLabelPrint-arm64.dmg`** from the [latest GitHub release](https://github.com/kingbeto/zebralabelprint/releases/latest), then:
+
+1. Open the `.dmg` file.
+2. Drag **ZebraLabelPrint.app** to the **Applications** folder.
+3. Eject the disk image.
+
+The app is now in your **Applications** folder (`/Applications/`), available from Launchpad and Spotlight.
+
+For a quick test, you can run the app directly from the mounted disk image — but drag it to Applications when you plan to keep using it.
 
 ## How to use
 

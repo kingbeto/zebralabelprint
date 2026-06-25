@@ -11,7 +11,7 @@ struct ContentView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             controlsPanel
-                .frame(width: 380)
+                .frame(width: 380) // fixed sidebar, preview takes the rest
                 .padding(24)
 
             Divider()
@@ -38,6 +38,7 @@ struct ContentView: View {
             viewModel.persistHorizontalOffset()
             viewModel.schedulePreviewRefresh()
         }
+        // seperate alerts — success vs failure messages got messy in one
         .alert("Print job sent", isPresented: $viewModel.showSuccessAlert) {
             Button("Close", role: .cancel) {}
         } message: {
@@ -259,6 +260,7 @@ struct ContentView: View {
     }
 
     private func updateWindowTitle() {
+        // SwiftUI doesnt always set the titlebar text on macOS 13
         for window in NSApplication.shared.windows {
             window.title = AppTitle.name
         }

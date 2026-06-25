@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 
+// fake label roll look — not trying to be pixel perfect
 struct LabelPreviewContainer: View {
     let images: [NSImage]
     let labelSizeInches: CGSize
@@ -15,6 +16,7 @@ struct LabelPreviewContainer: View {
                 width: max(geometry.size.width - padding * 2, 1),
                 height: max(geometry.size.height - padding * 2, 1)
             )
+            // scale labels to fit without squashing aspect ratio
             let labelDisplay = Self.labelDisplaySize(
                 labelSizeInches: labelSizeInches,
                 labelCount: images.count,
@@ -75,7 +77,7 @@ struct LabelPreviewContainer: View {
                     .frame(width: size.width, height: size.height)
 
                 Image(nsImage: image)
-                    .interpolation(.none)
+                    .interpolation(.none) // keep barcode edges sharp
                     .resizable()
                     .aspectRatio(contentMode: .fill)
                     .frame(width: size.width, height: size.height)

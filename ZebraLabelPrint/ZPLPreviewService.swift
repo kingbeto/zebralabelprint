@@ -68,6 +68,7 @@ struct ZPLLabelSize {
     }
 
     static func dpmm(forPrinter printerName: String) -> Int {
+        // parsed from queue name — bit hacky but it works for ZD series
         let name = printerName.lowercased()
         if name.contains("600") { return 24 }
         if name.contains("300") { return 12 }
@@ -138,6 +139,7 @@ struct ZPLLabelSize {
         )
 
         // Typical small label fallback when content is compact.
+        // 406x203 = 2x1 @ 203dpi, wich is what most of our rolls are
         if contentWidth <= 500, contentHeight <= 300 {
             return (width: max(contentWidth, 406), height: max(contentHeight, 203))
         }
@@ -203,6 +205,7 @@ enum ZPLModifier {
 enum ZPLPreviewService {
     static let previewStripCount = 5
 
+    // hits labelary over http — needs ATS exception in Info.plist
     static func renderLabels(
         zpl: String,
         printerName: String = "",

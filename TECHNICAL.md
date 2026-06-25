@@ -140,7 +140,19 @@ cp -R build/DerivedData/Build/Products/Release/ZebraLabelPrint.app ~/Downloads/
 cp -R build/DerivedData/Build/Products/Release/ZebraLabelPrint.app /Applications/
 ```
 
-### Create a DMG
+### Create a DMG (installer)
+
+For a drag-to-Applications installer with background art:
+
+```bash
+./scripts/make-dmg.sh
+```
+
+Output: `dist/ZebraLabelPrint-arm64.dmg`
+
+The script builds Release if needed, stages the app with an **Applications** shortcut, sets Finder icon positions, and compresses the image.
+
+Minimal DMG (app only, no layout):
 
 ```bash
 hdiutil create -volname "ZebraLabelPrint" \
@@ -173,7 +185,13 @@ ditto -c -k --sequesterRsrc --keepParent \
 
 Use `ditto`, not plain `zip`, so macOS metadata and the app bundle structure stay intact.
 
-**DMG (optional)** — nicer drag-to-Applications experience; use the DMG command above and attach `dist/ZebraLabelPrint-arm64.dmg` instead.
+**DMG (optional)** — drag-to-Applications installer:
+
+```bash
+./scripts/make-dmg.sh
+```
+
+Attach `dist/ZebraLabelPrint-arm64.dmg` to the release (instead of or alongside the zip).
 
 Name assets with `-arm64` so Intel users know the build is Apple silicon only.
 
