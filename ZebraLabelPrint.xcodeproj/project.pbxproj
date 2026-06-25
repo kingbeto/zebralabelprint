@@ -14,6 +14,7 @@
 		A10000010000000000000005 /* CUPSPrinterService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000006 /* CUPSPrinterService.swift */; };
 		A10000010000000000000006 /* ZPLPreviewService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000007 /* ZPLPreviewService.swift */; };
 		A10000010000000000000007 /* LabelPreviewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000009 /* LabelPreviewContainer.swift */; };
+		A10000010000000000000008 /* SetupRequirements.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000010 /* SetupRequirements.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		A10000020000000000000007 /* ZPLPreviewService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZPLPreviewService.swift; sourceTree = "<group>"; };
 		A10000020000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000020000000000000009 /* LabelPreviewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelPreviewContainer.swift; sourceTree = "<group>"; };
+		A10000020000000000000010 /* SetupRequirements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupRequirements.swift; sourceTree = "<group>"; };
 		A10000030000000000000001 /* ZebraLabelPrint.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ZebraLabelPrint.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -57,6 +59,7 @@
 				A10000020000000000000006 /* CUPSPrinterService.swift */,
 				A10000020000000000000007 /* ZPLPreviewService.swift */,
 				A10000020000000000000009 /* LabelPreviewContainer.swift */,
+				A10000020000000000000010 /* SetupRequirements.swift */,
 				A10000020000000000000004 /* Assets.xcassets */,
 				A10000020000000000000005 /* ZebraLabelPrint.entitlements */,
 				A10000020000000000000008 /* Info.plist */,
@@ -147,6 +150,7 @@
 				A10000010000000000000005 /* CUPSPrinterService.swift in Sources */,
 				A10000010000000000000006 /* ZPLPreviewService.swift in Sources */,
 				A10000010000000000000007 /* LabelPreviewContainer.swift in Sources */,
+				A10000010000000000000008 /* SetupRequirements.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

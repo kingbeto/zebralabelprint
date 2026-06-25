@@ -1,6 +1,6 @@
 # Zebra Label Print
 
-Print `.zpl` label files to your Zebra printer from macOS.
+Print ZPL label files to your Zebra printer from macOS. Files can be `.zpl` or `.txt` — what matters is that the content is valid ZPL, not the extension.
 
 ![Zebra Label Print — choose a ZPL file, pick your printer, preview labels, and print](docs/screenshot.png)
 
@@ -8,14 +8,16 @@ Print `.zpl` label files to your Zebra printer from macOS.
 
 - macOS 13 or later
 - Mac with Apple silicon (M1 or later). Intel Macs are not supported.
-- The Zebra **CUPS driver** installed on your Mac. This is required — the app prints through CUPS and will not work without it. Follow [Zebra’s guide to install the CUPS driver on macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false).
+- The Zebra **CUPS driver** installed on your Mac — this is a **Zebra / macOS printer requirement**, not something Zebra Label Print installs or enforces. Zebra requires their driver for printing on macOS; this app simply sends jobs to printers that are already set up in CUPS. Follow [Zebra’s guide to install the CUPS driver on macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false).
 - Your Zebra printer added in **System Settings → Printers & Scanners**
 
 ## Install
 
-### 1. Set up the Zebra CUPS driver (required)
+**TL;DR** — Apple silicon Mac (macOS 13+). First, set up your printer the way **Zebra** requires: [install their CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in System Settings (this is not part of installing Zebra Label Print). Then download the [`.dmg` release](https://github.com/kingbeto/zebralabelprint/releases/latest), drag **ZebraLabelPrint.app** to **Applications**, open it, pick a `.zpl` or `.txt` file with ZPL inside, click **Print**.
 
-Zebra Label Print prints through **CUPS**. Before installing the app, make sure your Zebra printer is set up with the official Zebra CUPS driver.
+### 1. Set up your Zebra printer in CUPS (required by Zebra, not this app)
+
+Zebra Label Print does not install drivers or configure printers. It only lists printers that macOS already exposes through **CUPS** and sends ZPL to the queue you pick. That only works if you have already completed Zebra’s own setup: install their official CUPS driver and add the printer in **System Settings → Printers & Scanners**.
 
 **Check from Terminal** — you should see at least one Zebra printer queue:
 
@@ -29,7 +31,7 @@ Example output when it is set up:
 Zebra_Technologies_ZTC_ZD410-203dpi_ZPL accepting requests since ...
 ```
 
-If that command prints nothing, CUPS is not ready for Zebra yet. Install the driver and add your printer following [Zebra’s guide to install the CUPS driver on macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false), then add the printer in **System Settings → Printers & Scanners**.
+If that command prints nothing, your Mac is not ready to print to Zebra yet — follow [Zebra’s guide to install the CUPS driver on macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in **System Settings → Printers & Scanners**. That step comes from Zebra’s printing stack, not from Zebra Label Print.
 
 To confirm the CUPS print system itself is running:
 
@@ -54,16 +56,16 @@ For a quick test, you can run the app directly from the mounted disk image — b
 ## How to use
 
 1. Open **Zebra Label Print**.
-2. Choose a `.zpl` file (the file picker opens on launch).
+2. Choose your label file (`.zpl` or `.txt` — the file picker opens on launch). The content must be ZPL; the extension is only for convenience.
 3. Pick your printer from the dropdown if needed. The app remembers your choice. On first launch it tries to select a printer whose name contains “zebra”.
 4. Check the preview on the right.
 5. Click **Print**.
 
 ## Preview
 
-The preview shows how your labels should look. It needs an internet connection. Physical output may differ slightly from the preview.
+The preview shows how your labels should look, whether your file is named `.zpl` or `.txt`. It needs an internet connection. Physical output may differ slightly from the preview.
 
-If your file has several labels, use the arrows below the preview to browse them.
+Preview shows the first label only (Labelary rate limits). Printing still sends every label in the file.
 
 ## Label size
 
@@ -79,9 +81,10 @@ macOS may block the app the first time you open it because it is not signed by A
 
 ## Troubleshooting
 
-- **No printers listed** — Add your Zebra printer in **System Settings → Printers & Scanners** and make sure it is online.
+- **No printers listed** — Zebra Label Print only shows queues already in CUPS. Install [Zebra’s CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add your printer in **System Settings → Printers & Scanners**.
 - **Print fails** — Confirm the printer is connected and has labels loaded. Try printing a test page from System Settings.
 - **No preview** — Check your internet connection. Preview uses an online rendering service.
+- **File won’t open or preview fails** — Make sure the file contains ZPL commands (e.g. `^XA` … `^XZ`), even if it uses a `.txt` extension.
 
 ## For developers
 

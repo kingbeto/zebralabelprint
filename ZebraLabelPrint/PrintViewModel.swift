@@ -17,11 +17,15 @@ final class PrintViewModel: ObservableObject {
     @Published var isLoadingPreview = false
     @Published var previewError = ""
     @Published var previewLabelInfo = ""
-    @Published var previewLabelIndex = 0
-    @Published var previewLabelCount = 0
+    @Published var previewLimitMessage = ""
+    @Published var labelsToPrintCount = 0
     @Published var horizontalOffsetMM: Double = 0
     @Published var printDefinitionInfo = ""
     @Published var selectedLabelSizeId: String = ZebraLabelSizeOption.defaultSize.id
+    @Published var requirements: [SetupRequirement] = []
+    @Published var isCheckingRequirements = false
+    @Published var isRestartingCUPS = false
+    @Published var printerQueueStatus: PrinterQueueStatus = .unknown
 
     private var previewLabels: [String] = []
     private var offsetPreviewTask: Task<Void, Never>?
@@ -36,6 +40,34 @@ final class PrintViewModel: ObservableObject {
         ZebraLabelSizeOption.option(id: selectedLabelSizeId)
     }
 
+    var canPrint: Bool {
+        selectedFileURL != nil
+            && SetupRequirementsChecker.canPrint(requirements, isPrinting: isPrinting)
+    }
+
+    var isSetupChecklistComplete: Bool {
+        SetupRequirementsChecker.canPrint(requirements, isPrinting: false)
+    }
+
+    var printBlockedReason: String? {
+        if selectedFileURL == nil {
+            return "Choose a label file first."
+        }
+        return SetupRequirementsChecker.printBlockedReason(requirements)
+    }
+
+    var needsZebraSetupHelp: Bool {
+        requirements.contains { $0.id == "zebra_queue" && $0.status == .failed }
+    }
+
+    var labelsToPrintSummary: String {
+        guard labelsToPrintCount > 0 else { return "" }
+        if labelsToPrintCount == 1 {
+            return "Will print 1 label."
+        }
+        return "Will print \(labelsToPrintCount) labels."
+    }
+
     init() {
         horizontalOffsetMM = UserDefaults.standard.double(forKey: horizontalOffsetKey)
         if let savedSizeId = UserDefaults.standard.string(forKey: labelSizeKey),
@@ -45,10 +77,82 @@ final class PrintViewModel: ObservableObject {
     }
 
     func onAppear() {
-        loadPrinters()
+        refreshRequirements()
         // open file picker straight away, thats the whole point of the app
         if selectedFileURL == nil {
             selectFile()
+        }
+    }
+
+    func refreshRequirements() {
+        isCheckingRequirements = true
+        defer { isCheckingRequirements = false }
+
+        let cupsRunning = CUPSPrinterService.isSchedulerRunning()
+        loadPrinters()
+
+        printerQueueStatus = selectedPrinter.isEmpty
+            ? .unknown
+            : CUPSPrinterService.printerQueueStatus(selectedPrinter)
+
+        requirements = SetupRequirementsChecker.evaluate(
+            cupsRunning: cupsRunning,
+            zebraPrinters: CUPSPrinterService.zebraPrinterNames(),
+            selectedPrinter: selectedPrinter,
+            printerQueueStatus: selectedPrinter.isEmpty ? nil : printerQueueStatus
+        )
+    }
+
+    func openZebraDriverGuide() {
+        SetupLinks.openZebraDriverGuide()
+    }
+
+    func openPrinterSettings() {
+        SetupLinks.openPrinterSettings()
+    }
+
+    func restartCUPS() {
+        guard !isRestartingCUPS else { return }
+
+        isRestartingCUPS = true
+        defer { isRestartingCUPS = false }
+
+        switch CUPSPrinterService.restartCUPSScheduler() {
+        case .success:
+            statusMessage = "CUPS restarted."
+            refreshRequirements()
+        case .failure(let error):
+            if case CUPSPrinterService.AdminCommandError.cancelled = error {
+                statusMessage = ""
+                return
+            }
+            errorMessage = error.localizedDescription
+            showErrorAlert = true
+        }
+    }
+
+    func refreshCUPSChecklistItem() {
+        let cupsRunning = requirements.first(where: { $0.id == "cups" })?.status == .passed
+            || CUPSPrinterService.isSchedulerRunning()
+
+        if cupsRunning {
+            refreshRequirements()
+            statusMessage = "CUPS status refreshed."
+            return
+        }
+
+        restartCUPS()
+    }
+
+    func resumeSelectedPrinter() {
+        guard !selectedPrinter.isEmpty else { return }
+
+        if CUPSPrinterService.resumePrinterQueue(selectedPrinter) {
+            statusMessage = "Printer queue resumed."
+            refreshRequirements()
+        } else {
+            errorMessage = "Could not resume \"\(selectedPrinter)\". Open Printer settings and clear Pause, or check that the printer is connected."
+            showErrorAlert = true
         }
     }
 
@@ -68,7 +172,7 @@ final class PrintViewModel: ObservableObject {
 
     func schedulePreviewRefresh() {
         offsetPreviewTask?.cancel()
-        // small debounce — slider onChange fires like crazy
+        // Debounce slider changes; each loadPreview still waits 200 ms inside ZPLPreviewService.
         offsetPreviewTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
@@ -90,7 +194,6 @@ final class PrintViewModel: ObservableObject {
 
         if printers.isEmpty {
             selectedPrinter = ""
-            statusMessage = "No printers found. Add a printer in System Settings."
             return
         }
 
@@ -162,26 +265,41 @@ final class PrintViewModel: ObservableObject {
             if selectedFileURL == nil {
                 statusMessage = "No file selected."
             }
+            refreshRequirements()
             return
         }
 
         selectedFileURL = url
         statusMessage = ""
-        previewLabelIndex = 0
         previewLabels = []
+        refreshLabelsToPrintCount()
+        refreshRequirements()
         Task { await loadPreview() }
     }
 
-    func showPreviousPreviewLabel() {
-        guard previewLabelIndex > 0 else { return }
-        previewLabelIndex -= 1
-        Task { await loadPreview() }
+    private func refreshLabelsToPrintCount() {
+        guard let fileURL = selectedFileURL,
+              let zpl = readZPL(from: fileURL) else {
+            labelsToPrintCount = 0
+            return
+        }
+        labelsToPrintCount = ZPLParser.labelCount(from: preparedZPL(from: zpl))
     }
 
-    func showNextPreviewLabel() {
-        guard previewLabelIndex < previewLabelCount - 1 else { return }
-        previewLabelIndex += 1
-        Task { await loadPreview() }
+    private func readZPL(from fileURL: URL) -> String? {
+        let accessing = fileURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessing {
+                fileURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let data = try? Data(contentsOf: fileURL),
+              !data.isEmpty,
+              let zpl = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return zpl
     }
 
     func loadPreview() async {
@@ -189,11 +307,14 @@ final class PrintViewModel: ObservableObject {
             previewImages = []
             previewError = ""
             previewLabelInfo = ""
+            previewLimitMessage = ""
+            labelsToPrintCount = 0
             return
         }
 
         isLoadingPreview = true
         previewError = ""
+        previewLimitMessage = ""
         defer { isLoadingPreview = false }
 
         let accessing = fileURL.startAccessingSecurityScopedResource()
@@ -215,58 +336,65 @@ final class PrintViewModel: ObservableObject {
         guard !zplData.isEmpty else {
             previewImages = []
             previewError = "The selected file is empty."
-            previewLabelCount = 0
+            labelsToPrintCount = 0
             return
         }
 
         guard let zpl = String(data: zplData, encoding: .utf8) else {
             previewImages = []
             previewError = "The ZPL file could not be read as text."
-            previewLabelCount = 0
+            labelsToPrintCount = 0
             return
         }
 
         let adjustedZPL = preparedZPL(from: zpl)
         previewLabels = ZPLParser.splitLabels(from: adjustedZPL)
-        previewLabelCount = previewLabels.count
-        previewLabelIndex = min(previewLabelIndex, max(previewLabelCount - 1, 0))
+        labelsToPrintCount = ZPLParser.labelCount(from: adjustedZPL)
 
         do {
             let dpmm = ZPLLabelSize.dpmm(forPrinter: selectedPrinter)
             let labelSize = selectedLabelSize.sizeInches
             previewLabelSizeInches = labelSize
-            updatePrintDefinition(for: previewLabels[previewLabelIndex])
-            // cap at 5 labels — labelary gets unhappy with huge batches
+            updatePrintDefinition(for: previewLabels.first)
+            // First label only; ZPLPreviewService sleeps 200 ms before each Labelary POST (rate limit).
             previewImages = try await ZPLPreviewService.renderLabels(
                 zpl: adjustedZPL,
                 printerName: selectedPrinter,
                 labelSizeInches: labelSize,
-                startIndex: previewLabelIndex,
-                count: ZPLPreviewService.previewStripCount
+                startIndex: 0,
+                count: 1
             )
 
-            let stripEnd = previewLabelIndex + previewImages.count
+            if labelsToPrintCount > 1 {
+                previewLimitMessage = "Showing the first label of \(labelsToPrintCount)."
+            } else {
+                previewLimitMessage = "This is the only label in the file."
+            }
+
             let dimensions = String(
                 format: "%@ @ %d dpmm",
                 selectedLabelSize.name,
                 dpmm
             )
-            if previewLabelCount > 1 {
-                previewLabelInfo = "Labels \(previewLabelIndex + 1)–\(stripEnd) of \(previewLabelCount) · \(dimensions)"
-            } else {
-                previewLabelInfo = "\(dimensions)"
-            }
+            previewLabelInfo = dimensions
             if horizontalOffsetMM != 0 {
                 previewLabelInfo += String(format: " · offset %+.1f mm", horizontalOffsetMM)
             }
         } catch {
             previewImages = []
             previewLabelInfo = ""
+            previewLimitMessage = ""
             previewError = error.localizedDescription
         }
     }
 
     func printFile() {
+        guard canPrint else {
+            errorMessage = printBlockedReason ?? "Complete the setup checklist before printing."
+            showErrorAlert = true
+            return
+        }
+
         guard let fileURL = selectedFileURL else {
             errorMessage = "Select a ZPL file first."
             showErrorAlert = true
@@ -319,8 +447,14 @@ final class PrintViewModel: ObservableObject {
         persistPrinter(selectedPrinter)
 
         switch CUPSPrinterService.printRaw(zplData: adjustedData, to: selectedPrinter) {
-        case .success:
-            statusMessage = "Print job sent successfully."
+        case .success(let result):
+            refreshRequirements()
+            switch result {
+            case .sent:
+                statusMessage = "Print job sent successfully."
+            case .queuedWhilePaused:
+                statusMessage = "Job queued, but the printer was paused. It has been resumed — check the printer if nothing prints."
+            }
             showSuccessAlert = true
         case .failure(let error):
             errorMessage = error.localizedDescription

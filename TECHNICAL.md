@@ -12,7 +12,7 @@ ZebraLabelPrint/
 ├── CUPSPrinterService.swift      lpstat / lpr integration
 ├── ZPLPreviewService.swift       Labelary API, ZPL parsing, ^LS offset injection
 ├── LabelPreviewContainer.swift   Label roll preview UI
-├── ZebraLabelPrint.entitlements  Sandbox: print, user-selected files, network
+├── ZebraLabelPrint.entitlements  Hardened runtime (not App Store sandboxed)
 ├── Info.plist                    ATS exception for api.labelary.com (HTTP)
 └── Assets.xcassets/
 ```
@@ -45,7 +45,7 @@ When the offset slider is non-zero, the app injects `^LS<n>` (dots) immediately 
 Preview is rendered by the [Labelary](http://labelary.com) API (`api.labelary.com`). The app:
 
 1. Splits multi-label ZPL on `^XA…^XZ` boundaries
-2. Renders up to 5 labels (no dummy duplication)
+2. Renders the first label only (Labelary rate limits; printing still sends all labels)
 3. Uses the user-selected label size for aspect ratio in `LabelPreviewContainer`
 
 `Info.plist` includes an App Transport Security exception for HTTP access to Labelary.
@@ -227,7 +227,7 @@ Xcode is installed but not selected. Use `xcode-select -s` or set `DEVELOPER_DIR
 
 **Print works in Terminal but not in the app**
 
-Check entitlements (`com.apple.security.print`, `com.apple.security.files.user-selected.read-only`). Confirm the queue name matches `lpstat -a` output exactly.
+Confirm the queue name matches `lpstat -a` output exactly. CUPS restart needs a local macOS administrator password (the app is not App Store sandboxed so privileged `launchctl` can run).
 
 **Verify raw print outside the app**
 

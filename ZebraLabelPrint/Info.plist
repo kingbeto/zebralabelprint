@@ -6,6 +6,8 @@
 	<string>Zebra Label Print</string>
 	<key>CFBundleName</key>
 	<string>Zebra Label Print</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Zebra Label Print uses administrator authorization to restart CUPS when you tap Restart CUPS.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>

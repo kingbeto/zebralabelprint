@@ -175,35 +175,94 @@ enum ZPLParser {
             return String(zpl[range])
         }
     }
+
+    /// Labels that will actually print: honors `^PQ` copies and `^XA` starts beyond `^XA…^XZ` pairs.
+    static func labelCount(from zpl: String) -> Int {
+        let blocks = splitLabels(from: zpl)
+        let sections = blocks.isEmpty ? [zpl] : blocks
+        let blockCount = max(sections.count, 1)
+
+        let pqSum = sections.reduce(0) { $0 + printQuantity(in: $1) }
+        if pqSum > blockCount {
+            return pqSum
+        }
+
+        let formatStarts = countFormatStarts(in: zpl)
+        if formatStarts > blockCount {
+            return formatStarts
+        }
+
+        return blockCount
+    }
+
+    private static func printQuantity(in zpl: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^PQ(\\d+)"),
+              let match = regex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
+              let valueRange = Range(match.range(at: 1), in: zpl),
+              let quantity = Int(zpl[valueRange]),
+              quantity > 0 else {
+            return 1
+        }
+        return quantity
+    }
+
+    private static func countFormatStarts(in zpl: String) -> Int {
+        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^XA") else { return 0 }
+        return regex.numberOfMatches(in: zpl, range: NSRange(zpl.startIndex..., in: zpl))
+    }
 }
 
 enum ZPLModifier {
-    /// Shifts all label content horizontally using ZPL `^LS` (label shift).
+    /// Shifts label content horizontally by adjusting field coordinates.
     /// Positive `offsetMM` moves content to the right; negative moves left.
     static func applyHorizontalOffset(to zpl: String, offsetMM: Double, dpmm: Int) -> String {
         guard offsetMM != 0 else { return zpl }
 
-        let dots = Int((offsetMM * Double(dpmm)).rounded())
-        guard dots != 0 else { return zpl }
+        let offsetDots = Int((offsetMM * Double(dpmm)).rounded())
+        guard offsetDots != 0 else { return zpl }
 
-        // ^LS positive = shift left; negative = shift right.
-        let shiftCommand = dots > 0 ? "^LS-\(dots)" : "^LS\(abs(dots))"
+        var result = zpl
+        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^FO)(\d+),(\d+)"#, offsetDots: offsetDots)
+        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^FT)(\d+),(\d+)"#, offsetDots: offsetDots)
+        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^GB)(\d+),(\d+),(\d+),(\d+)"#, offsetDots: offsetDots, xGroup: 2)
+        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^GC)(\d+),(\d+),(\d+)"#, offsetDots: offsetDots, xGroup: 2)
+        return result
+    }
 
-        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^XA") else {
-            return zpl
+    private static func shiftCommandCoordinates(
+        in zpl: String,
+        pattern: String,
+        offsetDots: Int,
+        xGroup: Int = 2
+    ) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return zpl }
+
+        let nsRange = NSRange(zpl.startIndex..., in: zpl)
+        let matches = regex.matches(in: zpl, range: nsRange)
+        guard !matches.isEmpty else { return zpl }
+
+        var result = zpl
+        for match in matches.reversed() {
+            guard let xValueRange = Range(match.range(at: xGroup), in: result),
+                  let x = Int(result[xValueRange]) else {
+                continue
+            }
+
+            let shiftedX = max(0, x + offsetDots)
+            result.replaceSubrange(xValueRange, with: String(shiftedX))
         }
 
-        let range = NSRange(zpl.startIndex..., in: zpl)
-        return regex.stringByReplacingMatches(
-            in: zpl,
-            range: range,
-            withTemplate: "^XA\(shiftCommand)"
-        )
+        return result
     }
 }
 
 enum ZPLPreviewService {
-    static let previewStripCount = 5
+    /// Labelary’s free API throttles rapid requests (HTTP 429). We only preview one
+    /// label per refresh and pause before each HTTP call so slider tweaks don’t trip the limit.
+    static let previewStripCount = 1
+
+    /// 200 ms between Labelary calls — space out requests when the user moves offset/size sliders.
+    private static let labelaryRequestDelayNanoseconds: UInt64 = 200_000_000
 
     // hits labelary over http — needs ATS exception in Info.plist
     static func renderLabels(
@@ -259,6 +318,9 @@ enum ZPLPreviewService {
         printerName: String,
         labelSizeInches: CGSize
     ) async throws -> NSImage {
+        // Pace every Labelary POST — renderLabel is the single entry point for HTTP previews.
+        try await Task.sleep(nanoseconds: labelaryRequestDelayNanoseconds)
+
         guard let zplData = labelZPL.data(using: .utf8) else {
             throw PreviewError.invalidZPL
         }
