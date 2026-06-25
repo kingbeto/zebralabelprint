@@ -240,14 +240,7 @@ final class PrintViewModel: ObservableObject {
                 count: ZPLPreviewService.previewStripCount
             )
 
-            if previewLabelCount == 1, let first = previewImages.first {
-                previewImages = Array(repeating: first, count: ZPLPreviewService.previewStripCount)
-            }
-
-            let stripEnd = min(
-                previewLabelIndex + min(previewImages.count, ZPLPreviewService.previewStripCount),
-                previewLabelCount
-            )
+            let stripEnd = previewLabelIndex + previewImages.count
             let dimensions = String(
                 format: "%@ @ %d dpmm",
                 selectedLabelSize.name,
@@ -256,7 +249,7 @@ final class PrintViewModel: ObservableObject {
             if previewLabelCount > 1 {
                 previewLabelInfo = "Labels \(previewLabelIndex + 1)–\(stripEnd) of \(previewLabelCount) · \(dimensions)"
             } else {
-                previewLabelInfo = "Showing \(previewImages.count) previews · \(dimensions)"
+                previewLabelInfo = "\(dimensions)"
             }
             if horizontalOffsetMM != 0 {
                 previewLabelInfo += String(format: " · offset %+.1f mm", horizontalOffsetMM)

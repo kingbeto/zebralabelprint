@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct ZebraPrintApp: App {
+struct ZebraLabelPrintApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()

@@ -1,164 +1,62 @@
 # Zebra Label Print
 
-A small macOS app for sending ZPL files to a Zebra printer via CUPS.
-
-## What it does
-
-1. Double-click **ZebraPrint** to launch the app.
-2. Choose a `.zpl` file (the file picker opens automatically on launch).
-3. Pick your printer from the dropdown if needed. Printer selection is remembered automatically. On first launch, if no printer was saved yet, the app auto-selects the first printer whose name matches `zebra` (case-insensitive).
-4. Click **Print**. The app runs:
-
-```bash
-lpr -P "SELECTED_ZEBRA_PRINTER" -l
-```
-
-The `-l` option sends the ZPL as raw/literal data (already formatted for the printer).
-
-## Preview
-
-When you select a ZPL file, a **preview** appears on the right. It is rendered via the [Labelary](http://labelary.com) API, which simulates how the label should look. This is an approximation — your physical Zebra output may differ slightly, but it is useful for checking layout and content before printing.
-
-## Horizontal offset
-
-If labels print slightly off-center on the roll, use the **Horizontal offset** slider (in mm). Positive values shift content to the right; negative values shift left. The offset is applied via ZPL `^LS` and affects both preview and print. Your setting is saved automatically.
-
-For a 2 mm shift to the right, set **+2.0 mm**.
+Print `.zpl` label files to your Zebra printer from macOS.
 
 ## Requirements
 
 - macOS 13 or later
-- Xcode (to build)
-- A Zebra printer already added in **System Settings → Printers & Scanners**
+- Mac with Apple silicon (M1 or later). Intel Macs are not supported.
+- The Zebra **CUPS driver** installed on your Mac. This is required — the app prints through CUPS and will not work without it. Follow [Zebra’s guide to install the CUPS driver on macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false).
+- Your Zebra printer added in **System Settings → Printers & Scanners**
 
-## Build
+## Install
 
-### Prerequisites
+Copy **ZebraLabelPrint.app** to your **Applications** folder (`/Applications/`). That is the standard place for macOS apps and keeps it available in Launchpad and Spotlight.
 
-You need **full Xcode** from the Mac App Store (Command Line Tools alone are not enough).
+For a quick test, you can run it from **Downloads** instead — but move it to Applications when you plan to keep using it.
 
-Verify Xcode is selected:
+If you received the app as a download (for example from a GitHub release), do not put the built app inside this source folder. Use Applications on each Mac where you want to run it.
 
-```bash
-xcode-select -p
-```
+## How to use
 
-It should show `/Applications/Xcode.app/Contents/Developer`. If it shows `CommandLineTools`, Xcode is installed but not selected. Fix it permanently:
+1. Open **Zebra Label Print**.
+2. Choose a `.zpl` file (the file picker opens on launch).
+3. Pick your printer from the dropdown if needed. The app remembers your choice. On first launch it tries to select a printer whose name contains “zebra”.
+4. Check the preview on the right.
+5. Click **Print**.
 
-```bash
-sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-```
+## Preview
 
-Or prefix build commands with `DEVELOPER_DIR` (no `sudo` needed):
+The preview shows how your labels should look. It needs an internet connection. Physical output may differ slightly from the preview.
 
-```bash
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-```
+If your file has several labels, use the arrows below the preview to browse them.
 
-### Troubleshooting
+## Label size
 
-If you see:
+Choose the size that matches your label roll. This sets the preview proportions. The default is 2″ × 1″.
 
-```
-xcode-select: error: tool 'xcodebuild' requires Xcode, but active developer directory '/Library/Developer/CommandLineTools' is a command line tools instance
-```
+## Horizontal offset
 
-Xcode is installed but not active. Use `sudo xcode-select -s` above, or set `DEVELOPER_DIR` before `xcodebuild`. The `cp` step will also fail if the build did not complete.
+If labels print slightly off-center, use the **Horizontal offset** slider (in millimeters). Positive values shift content to the right; negative values shift left. Your setting is saved automatically.
 
-### Option 1: Build in Xcode
+## First launch
 
-```bash
-open ZebraPrint.xcodeproj
-```
+macOS may block the app the first time you open it because it is not signed by Apple. Right-click the app, choose **Open**, then click **Open** again. You can also allow it in **System Settings → Privacy & Security**.
 
-1. Set the scheme to **ZebraPrint** and the destination to **My Mac**.
-2. Press **⌘R** to build and run, or **⌘B** to build only.
-3. For a Release build: **Product → Scheme → Edit Scheme → Run → Build Configuration → Release**.
+## Troubleshooting
 
-The built app is usually at:
+- **No printers listed** — Add your Zebra printer in **System Settings → Printers & Scanners** and make sure it is online.
+- **Print fails** — Confirm the printer is connected and has labels loaded. Try printing a test page from System Settings.
+- **No preview** — Check your internet connection. Preview uses an online rendering service.
 
-```
-~/Library/Developer/Xcode/DerivedData/ZebraPrint-*/Build/Products/Release/ZebraPrint.app
-```
+## For developers
 
-Find it quickly:
+Build instructions, architecture notes, and command-line details are in [TECHNICAL.md](TECHNICAL.md).
 
-```bash
-find ~/Library/Developer/Xcode/DerivedData -name "ZebraPrint.app" -path "*/Release/*" 2>/dev/null | head -1
-```
+## License
 
-### Option 2: Build from the command line
+GPL-3.0 — see [LICENSE](LICENSE).
 
-From the project folder, with a predictable output path:
+## Author
 
-```bash
-cd /Users/alberto/Sites/zebra
-
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-
-xcodebuild \
-  -project ZebraPrint.xcodeproj \
-  -scheme ZebraPrint \
-  -configuration Release \
-  -derivedDataPath build/DerivedData \
-  build
-```
-
-The `.app` will be at:
-
-```
-build/DerivedData/Build/Products/Release/ZebraPrint.app
-```
-
-### Build and copy to Downloads
-
-```bash
-cd /Users/alberto/Sites/zebra
-
-export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
-
-xcodebuild \
-  -project ZebraPrint.xcodeproj \
-  -scheme ZebraPrint \
-  -configuration Release \
-  -derivedDataPath build/DerivedData \
-  build
-
-rm -rf ~/Downloads/ZebraPrint.app
-cp -R build/DerivedData/Build/Products/Release/ZebraPrint.app ~/Downloads/
-```
-
-The app will be at `~/Downloads/ZebraPrint.app`.
-
-### Install to Applications
-
-```bash
-cp -R build/DerivedData/Build/Products/Release/ZebraPrint.app /Applications/
-```
-
-### First launch
-
-macOS may block an unsigned app on first open. Use **right-click → Open → Open**, or allow it in **System Settings → Privacy & Security**.
-
-### Optional: create a DMG
-
-```bash
-hdiutil create -volname "ZebraPrint" \
-  -srcfolder build/DerivedData/Build/Products/Release/ZebraPrint.app \
-  -ov -format UDZO ZebraPrint.dmg
-```
-
-## App icon
-
-The app icon is from [The Noun Project](https://thenounproject.com/) (zebra illustration). Rebuild in Xcode (**⌘R**) to see it in the Dock and Finder.
-
-## Notes
-
-- Printer names come from CUPS (`lpstat -a`), not display names. Your queue might look like `Zebra_Technologies_ZTC_ZD410-203dpi_ZPL`.
-- If printing fails, check that the printer is online and that this works in Terminal:
-
-```bash
-cat /path/to/file.zpl | lpr -P "YourPrinter" -l
-```
-
-- Preview requires internet access (Labelary API).
+**Alberto Pardo Saleme** — [LinkedIn](https://www.linkedin.com/in/alberto-pardo-saleme/)
