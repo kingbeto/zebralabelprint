@@ -275,3 +275,9 @@ The icon is from [The Noun Project](https://thenounproject.com/) (zebra illustra
 | Horizontal offset | Shift `^FO` / `^FT` / `^GB` / `^GC` X coordinates, not `^LS` |
 | CUPS locale | `lpstat -r` output is localized; parse text, not English-only strings |
 | SwiftUI `onChange` | Single-parameter form for macOS 13 compatibility |
+
+## Discoverability (SEO)
+
+Most users find this project through **GitHub search** and **Google** indexing the README. Keep the README title and opening paragraph aligned with how people search (e.g. “print ZPL on Mac”, “Zebra printer macOS”, model names like ZD410).
+
+Maintainers should set the GitHub **About** description and **topics** — see [.github/REPOSITORY.md](.github/REPOSITORY.md). Release titles and notes on GitHub (e.g. “Zebra Label Print for Mac — ZPL printing”) also help search snippets.
