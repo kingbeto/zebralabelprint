@@ -24,11 +24,17 @@ final class PrintViewModel: ObservableObject {
     @Published var selectedLabelSizeId: String = ZebraLabelSizeOption.defaultSize.id
     @Published var requirements: [SetupRequirement] = []
     @Published var isCheckingRequirements = false
+    @Published var isPollingSetupStatus = false
     @Published var isRestartingCUPS = false
     @Published var printerQueueStatus: PrinterQueueStatus = .unknown
 
     private var previewLabels: [String] = []
     private var offsetPreviewTask: Task<Void, Never>?
+    private var setupRefreshTask: Task<Void, Never>?
+
+    // Printer wake-up after power-on can take several seconds; poll before giving up.
+    private static let setupRefreshPollIntervalNanoseconds: UInt64 = 2_500_000_000
+    private static let setupRefreshTimeoutNanoseconds: UInt64 = 15_000_000_000
 
     private let lastPrinterKey = "lastSelectedPrinter"
     private let horizontalOffsetKey = "horizontalOffsetMM"
@@ -87,7 +93,52 @@ final class PrintViewModel: ObservableObject {
     func refreshRequirements() {
         isCheckingRequirements = true
         defer { isCheckingRequirements = false }
+        applyRequirementsCheck()
+    }
 
+    /// Poll setup status for up to ~15 s so a printer that was just turned on can come online.
+    func refreshSetupStatus() {
+        setupRefreshTask?.cancel()
+        setupRefreshTask = Task {
+            isCheckingRequirements = true
+            isPollingSetupStatus = false
+            defer {
+                isCheckingRequirements = false
+                isPollingSetupStatus = false
+            }
+
+            applyRequirementsCheck()
+
+            guard !selectedPrinter.isEmpty else {
+                statusMessage = ""
+                return
+            }
+
+            if isSetupChecklistComplete {
+                statusMessage = "Setup looks good."
+                return
+            }
+
+            isPollingSetupStatus = true
+            let started = ContinuousClock.now
+
+            while ContinuousClock.now - started < .nanoseconds(Int64(Self.setupRefreshTimeoutNanoseconds)) {
+                try? await Task.sleep(nanoseconds: Self.setupRefreshPollIntervalNanoseconds)
+                guard !Task.isCancelled else { return }
+
+                applyRequirementsCheck()
+
+                if isSetupChecklistComplete {
+                    statusMessage = "Setup looks good."
+                    return
+                }
+            }
+
+            statusMessage = setupStatusSummaryAfterTimeout()
+        }
+    }
+
+    private func applyRequirementsCheck() {
         let cupsRunning = CUPSPrinterService.isSchedulerRunning()
         loadPrinters()
 
@@ -101,6 +152,22 @@ final class PrintViewModel: ObservableObject {
             selectedPrinter: selectedPrinter,
             printerQueueStatus: selectedPrinter.isEmpty ? nil : printerQueueStatus
         )
+    }
+
+    private func setupStatusSummaryAfterTimeout() -> String {
+        if isSetupChecklistComplete {
+            return "Setup looks good."
+        }
+        switch printerQueueStatus {
+        case .ready:
+            return "Printer queue is ready. Complete the remaining checklist items."
+        case .offline:
+            return "Printer still offline after 15 seconds. Check power and USB/Wi‑Fi, then refresh again."
+        case .paused:
+            return "Queue is still paused. Tap Resume if the printer is on."
+        case .unknown:
+            return "Queue status unclear after 15 seconds. Try refresh again."
+        }
     }
 
     func openZebraDriverGuide() {

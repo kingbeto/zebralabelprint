@@ -117,13 +117,6 @@ struct ContentView: View {
                     .labelsHidden()
                     .pickerStyle(.menu)
                 }
-
-                if !viewModel.selectedPrinter.isEmpty {
-                    PrinterQueueStatusBanner(
-                        status: viewModel.printerQueueStatus,
-                        onResume: { viewModel.resumeSelectedPrinter() }
-                    )
-                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -210,12 +203,30 @@ struct ContentView: View {
                 }
             }
 
-            RequirementsPanel(
-                viewModel: viewModel,
-                isExpanded: isChecklistExpanded,
-                onExpand: { isChecklistManuallyExpanded = true },
-                onCollapse: { isChecklistManuallyExpanded = false }
-            )
+            VStack(alignment: .leading, spacing: 8) {
+                if !viewModel.selectedPrinter.isEmpty {
+                    PrinterQueueStatusBanner(
+                        status: viewModel.printerQueueStatus,
+                        isRefreshing: viewModel.isCheckingRequirements,
+                        onRefresh: { viewModel.refreshSetupStatus() },
+                        onResume: { viewModel.resumeSelectedPrinter() }
+                    )
+                }
+
+                if viewModel.isPollingSetupStatus {
+                    Text("Checking again — the printer may take a moment to come online. Please stand by.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                RequirementsPanel(
+                    viewModel: viewModel,
+                    isExpanded: isChecklistExpanded,
+                    onExpand: { isChecklistManuallyExpanded = true },
+                    onCollapse: { isChecklistManuallyExpanded = false }
+                )
+            }
         }
         .padding(24)
     }
@@ -325,7 +336,7 @@ private struct RequirementsPanel: View {
 
                 if isExpanded {
                     Button("Check again") {
-                        viewModel.refreshRequirements()
+                        viewModel.refreshSetupStatus()
                     }
                     .disabled(viewModel.isCheckingRequirements)
 
@@ -346,6 +357,15 @@ private struct RequirementsPanel: View {
                     }
                     .buttonStyle(.borderless)
                     .help("Expand checklist")
+
+                    Button {
+                        viewModel.refreshSetupStatus()
+                    } label: {
+                        Image(systemName: "arrow.clockwise.circle")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Refresh printer and setup status")
+                    .disabled(viewModel.isCheckingRequirements)
                 }
             }
 
@@ -374,15 +394,26 @@ private struct RequirementsPanel: View {
                             .disabled(viewModel.isRestartingCUPS || viewModel.isCheckingRequirements)
                         }
 
-                        if requirement.id == "printer_ready", requirement.status != .passed {
+                        if requirement.id == "printer_ready" {
                             Button {
-                                viewModel.resumeSelectedPrinter()
+                                viewModel.refreshSetupStatus()
                             } label: {
-                                Image(systemName: "play.circle")
+                                Image(systemName: "arrow.clockwise.circle")
                             }
                             .buttonStyle(.borderless)
-                            .help("Resume printer queue")
+                            .help("Refresh printer queue status")
                             .disabled(viewModel.isCheckingRequirements)
+
+                            if requirement.status != .passed {
+                                Button {
+                                    viewModel.resumeSelectedPrinter()
+                                } label: {
+                                    Image(systemName: "play.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Resume printer queue")
+                                .disabled(viewModel.isCheckingRequirements)
+                            }
                         }
                     }
                 }
@@ -430,6 +461,8 @@ private struct RequirementsPanel: View {
 
 private struct PrinterQueueStatusBanner: View {
     let status: PrinterQueueStatus
+    let isRefreshing: Bool
+    let onRefresh: () -> Void
     let onResume: () -> Void
 
     var body: some View {
@@ -452,11 +485,26 @@ private struct PrinterQueueStatusBanner: View {
 
             Spacer(minLength: 0)
 
+            if isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+            }
+
+            Button {
+                onRefresh()
+            } label: {
+                Image(systemName: "arrow.clockwise.circle")
+            }
+            .buttonStyle(.borderless)
+            .help("Refresh queue status (polls for up to 15 seconds)")
+            .disabled(isRefreshing)
+
             if status == .paused {
                 Button("Resume") {
                     onResume()
                 }
                 .controlSize(.small)
+                .disabled(isRefreshing)
             }
         }
         .padding(10)

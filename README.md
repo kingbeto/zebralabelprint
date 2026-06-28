@@ -13,7 +13,7 @@ Print ZPL label files to your Zebra printer from macOS. Files can be `.zpl` or `
 
 ## Install
 
-**TL;DR** — Apple silicon Mac (macOS 13+). First, set up your printer the way **Zebra** requires: [install their CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in System Settings (this is not part of installing Zebra Label Print). Then download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.1.0/ZebraLabelPrint-arm64.dmg)**, drag **ZebraLabelPrint.app** to **Applications**, open it, pick a `.zpl` or `.txt` file with ZPL inside, click **Print**.
+**TL;DR** — Apple silicon Mac (macOS 13+). First, set up your printer the way **Zebra** requires: [install their CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in System Settings (this is not part of installing Zebra Label Print). Then download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.2.0/ZebraLabelPrint-arm64.dmg)**, drag **ZebraLabelPrint.app** to **Applications**, open it, pick a `.zpl` or `.txt` file with ZPL inside, click **Print**.
 
 ### 1. Set up your Zebra printer in CUPS (required by Zebra, not this app)
 
@@ -43,7 +43,7 @@ You should see `scheduler is running`.
 
 ### 2. Install Zebra Label Print
 
-Download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.1.0/ZebraLabelPrint-arm64.dmg)** (v1.1.0), then:
+Download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.2.0/ZebraLabelPrint-arm64.dmg)** (v1.2.0), then:
 
 1. Open the `.dmg` file.
 2. Drag **ZebraLabelPrint.app** to the **Applications** folder.

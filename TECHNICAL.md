@@ -221,8 +221,8 @@ The `dist/` folder is gitignored.
 **In the browser**
 
 1. Open the repo → **Releases** → **Draft a new release**
-2. Choose a tag (for example `v1.1.0`)
-3. Title: `Zebra Label Print 1.1.0`
+2. Choose a tag (for example `v1.2.0`)
+3. Title: `Zebra Label Print 1.2.0`
 4. Attach `dist/ZebraLabelPrint-arm64.dmg`
 5. Note in the release body: macOS 13+, Apple silicon, CUPS driver required
 6. Publish release
@@ -230,9 +230,9 @@ The `dist/` folder is gitignored.
 **With GitHub CLI** (`gh`):
 
 ```bash
-gh release create v1.1.0 \
+gh release create v1.2.0 \
   dist/ZebraLabelPrint-arm64.dmg \
-  --title "Zebra Label Print 1.1.0" \
+  --title "Zebra Label Print 1.2.0" \
   --notes "macOS 13+. Apple silicon (arm64) only. Requires Zebra CUPS driver."
 ```
 
