@@ -15,7 +15,6 @@
 		A10000010000000000000006 /* ZPLPreviewService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000007 /* ZPLPreviewService.swift */; };
 		A10000010000000000000007 /* LabelPreviewContainer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000009 /* LabelPreviewContainer.swift */; };
 		A10000010000000000000008 /* SetupRequirements.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000020000000000000010 /* SetupRequirements.swift */; };
-		B10000010000000000000001 /* LabelSelectionParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000001 /* LabelSelectionParser.swift */; };
 		B10000010000000000000002 /* PrinterDpmm.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000002 /* PrinterDpmm.swift */; };
 		B10000010000000000000010 /* ZPLParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000010 /* ZPLParserTests.swift */; };
 		B10000010000000000000011 /* ZPLModifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B10000020000000000000011 /* ZPLModifierTests.swift */; };
@@ -33,7 +32,6 @@
 		A10000020000000000000008 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A10000020000000000000009 /* LabelPreviewContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelPreviewContainer.swift; sourceTree = "<group>"; };
 		A10000020000000000000010 /* SetupRequirements.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupRequirements.swift; sourceTree = "<group>"; };
-		B10000020000000000000001 /* LabelSelectionParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LabelSelectionParser.swift; sourceTree = "<group>"; };
 		B10000020000000000000002 /* PrinterDpmm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrinterDpmm.swift; sourceTree = "<group>"; };
 		B10000020000000000000010 /* ZPLParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZPLParserTests.swift; sourceTree = "<group>"; };
 		B10000020000000000000011 /* ZPLModifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ZPLModifierTests.swift; sourceTree = "<group>"; };
@@ -79,7 +77,6 @@
 				A10000020000000000000007 /* ZPLPreviewService.swift */,
 				A10000020000000000000009 /* LabelPreviewContainer.swift */,
 				A10000020000000000000010 /* SetupRequirements.swift */,
-				B10000020000000000000001 /* LabelSelectionParser.swift */,
 				B10000020000000000000002 /* PrinterDpmm.swift */,
 				A10000020000000000000004 /* Assets.xcassets */,
 				A10000020000000000000005 /* ZebraLabelPrint.entitlements */,
@@ -223,7 +220,6 @@
 				A10000010000000000000006 /* ZPLPreviewService.swift in Sources */,
 				A10000010000000000000007 /* LabelPreviewContainer.swift in Sources */,
 				A10000010000000000000008 /* SetupRequirements.swift in Sources */,
-				B10000010000000000000001 /* LabelSelectionParser.swift in Sources */,
 				B10000010000000000000002 /* PrinterDpmm.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

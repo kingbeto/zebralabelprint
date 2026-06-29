@@ -8,8 +8,7 @@ Developer documentation for building, extending, and debugging the app.
 ZebraLabelPrint/
 ├── ZebraLabelPrintApp.swift      @main entry point
 ├── ContentView.swift             SwiftUI layout, setup checklist UI
-├── PrintViewModel.swift          State, persistence, print/preview orchestration
-├── LabelSelectionParser.swift    Print scope parsing (all / range / pages)
+├── PrintViewModel.swift          State, persistence, print/preview orchestration, label selection parsing
 ├── PrinterDpmm.swift             DPMM inference from CUPS queue name
 ├── CUPSPrinterService.swift      lpstat / lpr, queue status, pause/resume/cancel, CUPS restart
 ├── SetupRequirements.swift       Setup checklist rules and Zebra driver links
@@ -36,7 +35,7 @@ ZebraLabelPrintTests/
 
 - **Controls column** — fixed 460 pt width; **Print labels** section always visible with fixed-height option row and hint area to avoid layout shift when switching scope or loading a file
 - **Preview column** — expands to fill remaining window width; label image scales to fit the preview area
-- **`PrintLabelScope`** — defined at the top of `PrintViewModel.swift` (`all`, `range`, `pages`); selection logic and `LabelSelectionError` live in the same file
+- **`PrintLabelScope`** — at the top of `PrintViewModel.swift` (`all`, `range`, `pages`); `LabelSelectionParser` and `LabelSelectionError` are in the same file for module visibility
 
 ## Printing
 
@@ -106,7 +105,7 @@ The ↻ control restarts CUPS with `launchctl kickstart -k system/org.cups.cupsd
 2. Read `^PQ` per block (default 1)
 3. Normalize each block to `^PQ1` and repeat it `^PQ` times — one array entry per **physical** label
 
-Printing sends only the ZPL for indices chosen in **Print labels** via `buildPrintZPL(from:oneBasedIndices:)`. Parsing lives in `LabelSelectionParser.swift`.
+Printing sends only the ZPL for indices chosen in **Print labels** via `buildPrintZPL(from:oneBasedIndices:)`. Parsing lives in `LabelSelectionParser` at the bottom of `PrintViewModel.swift`.
 
 ## Preview
 
