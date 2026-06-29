@@ -58,142 +58,19 @@ struct ZebraPrintResolutionOption: Identifiable, Hashable {
         if let dpmm = option.dpmm {
             return dpmm
         }
-        return ZPLLabelSize.dpmm(forPrinter: printerName)
-    }
-}
-
-struct ZPLLabelSize {
-    let dpmm: Int
-    let widthInches: Double
-    let heightInches: Double
-
-    var sizeInches: CGSize {
-        CGSize(width: widthInches, height: heightInches)
-    }
-
-    static func from(zpl: String, dpmm: Int = 8) -> ZPLLabelSize {
-        let dotsPerInch = Double(dpmm) * 25.4
-        let pw = extractInt(from: zpl, command: "PW")
-        let ll = extractInt(from: zpl, command: "LL")
-
-        if let pw, let ll, pw > 0, ll > 0 {
-            return ZPLLabelSize(
-                dpmm: dpmm,
-                widthInches: Double(pw) / dotsPerInch,
-                heightInches: Double(ll) / dotsPerInch
-            )
-        }
-
-        let inferred = inferSizeDots(from: zpl)
-        let widthDots = pw ?? inferred.width
-        let heightDots = ll ?? inferred.height
-
-        return ZPLLabelSize(
-            dpmm: dpmm,
-            widthInches: max(0.25, Double(widthDots) / dotsPerInch),
-            heightInches: max(0.25, Double(heightDots) / dotsPerInch)
-        )
-    }
-
-    static func dpmm(forPrinter printerName: String) -> Int {
-        // parsed from queue name — bit hacky but it works for ZD series
-        let name = printerName.lowercased()
-        if name.contains("600") { return 24 }
-        if name.contains("300") { return 12 }
-        return 8
-    }
-
-    private static func inferSizeDots(from zpl: String) -> (width: Int, height: Int) {
-        var maxX = 0
-        var maxY = 0
-        var fbWidth = 0
-        var fbLines = 2
-        var fontHeight = 28
-        var barcodeHeight = 50
-
-        if let foRegex = try? NSRegularExpression(pattern: "(?i)\\^FO(\\d+),(\\d+)") {
-            for match in foRegex.matches(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)) {
-                guard let xRange = Range(match.range(at: 1), in: zpl),
-                      let yRange = Range(match.range(at: 2), in: zpl),
-                      let x = Int(zpl[xRange]),
-                      let y = Int(zpl[yRange]) else { continue }
-                maxX = max(maxX, x)
-                maxY = max(maxY, y)
-            }
-        }
-
-        if let fbRegex = try? NSRegularExpression(pattern: "(?i)\\^FB(\\d+),(\\d+)") {
-            if let match = fbRegex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
-               let widthRange = Range(match.range(at: 1), in: zpl),
-               let linesRange = Range(match.range(at: 2), in: zpl),
-               let width = Int(zpl[widthRange]),
-               let lines = Int(zpl[linesRange]) {
-                fbWidth = width
-                fbLines = max(lines, 1)
-            }
-        }
-
-        if let fontRegex = try? NSRegularExpression(pattern: "(?i)\\^A0N,(\\d+)") {
-            if let match = fontRegex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
-               let heightRange = Range(match.range(at: 1), in: zpl),
-               let height = Int(zpl[heightRange]) {
-                fontHeight = height
-            }
-        }
-
-        if let bcRegex = try? NSRegularExpression(pattern: "(?i)\\^BCN,(\\d+)") {
-            if let match = bcRegex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
-               let heightRange = Range(match.range(at: 1), in: zpl),
-               let height = Int(zpl[heightRange]) {
-                barcodeHeight = height
-            }
-        }
-
-        if let gbRegex = try? NSRegularExpression(pattern: "(?i)\\^GB(\\d+),(\\d+)") {
-            if let match = gbRegex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
-               let widthRange = Range(match.range(at: 1), in: zpl),
-               let heightRange = Range(match.range(at: 2), in: zpl),
-               let width = Int(zpl[widthRange]),
-               let height = Int(zpl[heightRange]) {
-                maxX = max(maxX, width)
-                maxY = max(maxY, height)
-            }
-        }
-
-        let contentWidth = max(maxX + max(fbWidth, 80), 160)
-        let contentHeight = max(
-            maxY + barcodeHeight + fbLines * fontHeight + 24,
-            maxY + 80
-        )
-
-        // Typical small label fallback when content is compact.
-        // 406x203 = 2x1 @ 203dpi, wich is what most of our rolls are
-        if contentWidth <= 500, contentHeight <= 300 {
-            return (width: max(contentWidth, 406), height: max(contentHeight, 203))
-        }
-
-        return (width: contentWidth, height: contentHeight)
-    }
-
-    private static func extractInt(from zpl: String, command: String) -> Int? {
-        let pattern = "\\^\(command)(\\d+)"
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
-              let valueRange = Range(match.range(at: 1), in: zpl) else {
-            return nil
-        }
-        return Int(zpl[valueRange])
+        return PrinterDpmm.fromPrinterName(printerName)
     }
 }
 
 enum ZPLParser {
+    private static let splitLabelsRegex = try! NSRegularExpression(pattern: "(?is)\\^XA.*?\\^XZ")
+    private static let printQuantityRegex = try! NSRegularExpression(pattern: "(?i)\\^PQ(\\d+)")
+    private static let normalizePQRegex = try! NSRegularExpression(pattern: "(?i)\\^PQ\\d+")
+    private static let hasFormatStartRegex = try! NSRegularExpression(pattern: "(?i)\\^XA")
+
     /// Splits a ZPL file into individual label definitions (`^XA` … `^XZ`).
     static func splitLabels(from zpl: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: "(?is)\\^XA.*?\\^XZ") else {
-            return [zpl]
-        }
-
-        let matches = regex.matches(in: zpl, range: NSRange(zpl.startIndex..., in: zpl))
+        let matches = splitLabelsRegex.matches(in: zpl, range: NSRange(zpl.startIndex..., in: zpl))
         if matches.isEmpty {
             return [zpl]
         }
@@ -204,39 +81,14 @@ enum ZPLParser {
         }
     }
 
-    /// Labels that will actually print: honors `^PQ` copies and `^XA` starts beyond `^XA…^XZ` pairs.
-    static func labelCount(from zpl: String) -> Int {
-        let blocks = splitLabels(from: zpl)
-        let sections = blocks.isEmpty ? [zpl] : blocks
-        let blockCount = max(sections.count, 1)
-
-        let pqSum = sections.reduce(0) { $0 + printQuantity(in: $1) }
-        if pqSum > blockCount {
-            return pqSum
-        }
-
-        let formatStarts = countFormatStarts(in: zpl)
-        if formatStarts > blockCount {
-            return formatStarts
-        }
-
-        return blockCount
-    }
-
     private static func printQuantity(in zpl: String) -> Int {
-        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^PQ(\\d+)"),
-              let match = regex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
+        guard let match = printQuantityRegex.firstMatch(in: zpl, range: NSRange(zpl.startIndex..., in: zpl)),
               let valueRange = Range(match.range(at: 1), in: zpl),
               let quantity = Int(zpl[valueRange]),
               quantity > 0 else {
             return 1
         }
         return quantity
-    }
-
-    private static func countFormatStarts(in zpl: String) -> Int {
-        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^XA") else { return 0 }
-        return regex.numberOfMatches(in: zpl, range: NSRange(zpl.startIndex..., in: zpl))
     }
 
     /// One ZPL block per printed label, expanding `^PQ` copies.
@@ -253,10 +105,7 @@ enum ZPLParser {
             }
         }
 
-        if !expanded.isEmpty {
-            return expanded
-        }
-        return [zpl]
+        return expanded
     }
 
     static func buildPrintZPL(from zpl: String, oneBasedIndices: [Int]) -> String {
@@ -270,19 +119,26 @@ enum ZPLParser {
 
     /// Labels you can target when printing (one entry per physical output).
     static func printableLabelCount(from zpl: String) -> Int {
-        max(expandedLabelZPLBlocks(from: zpl).count, 1)
+        let trimmed = zpl.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return 0 }
+        guard hasFormatStartRegex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil else {
+            return 0
+        }
+        return expandedLabelZPLBlocks(from: trimmed).count
     }
 
     private static func normalizeToSingleCopy(_ block: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^PQ\\d+") else {
-            return block
-        }
         let range = NSRange(block.startIndex..., in: block)
-        return regex.stringByReplacingMatches(in: block, range: range, withTemplate: "^PQ1")
+        return normalizePQRegex.stringByReplacingMatches(in: block, range: range, withTemplate: "^PQ1")
     }
 }
 
 enum ZPLModifier {
+    private static let foRegex = try! NSRegularExpression(pattern: #"(?i)(\^FO)(\d+),(\d+)"#)
+    private static let ftRegex = try! NSRegularExpression(pattern: #"(?i)(\^FT)(\d+),(\d+)"#)
+    private static let gbRegex = try! NSRegularExpression(pattern: #"(?i)(\^GB)(\d+),(\d+),(\d+),(\d+)"#)
+    private static let gcRegex = try! NSRegularExpression(pattern: #"(?i)(\^GC)(\d+),(\d+),(\d+)"#)
+
     /// Shifts label content horizontally by adjusting field coordinates.
     /// Positive `offsetMM` moves content to the right; negative moves left.
     static func applyHorizontalOffset(to zpl: String, offsetMM: Double, dpmm: Int) -> String {
@@ -292,21 +148,19 @@ enum ZPLModifier {
         guard offsetDots != 0 else { return zpl }
 
         var result = zpl
-        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^FO)(\d+),(\d+)"#, offsetDots: offsetDots)
-        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^FT)(\d+),(\d+)"#, offsetDots: offsetDots)
-        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^GB)(\d+),(\d+),(\d+),(\d+)"#, offsetDots: offsetDots, xGroup: 2)
-        result = shiftCommandCoordinates(in: result, pattern: #"(?i)(\^GC)(\d+),(\d+),(\d+)"#, offsetDots: offsetDots, xGroup: 2)
+        result = shiftCommandCoordinates(in: result, regex: foRegex, offsetDots: offsetDots)
+        result = shiftCommandCoordinates(in: result, regex: ftRegex, offsetDots: offsetDots)
+        result = shiftCommandCoordinates(in: result, regex: gbRegex, offsetDots: offsetDots, xGroup: 2)
+        result = shiftCommandCoordinates(in: result, regex: gcRegex, offsetDots: offsetDots, xGroup: 2)
         return result
     }
 
     private static func shiftCommandCoordinates(
         in zpl: String,
-        pattern: String,
+        regex: NSRegularExpression,
         offsetDots: Int,
         xGroup: Int = 2
     ) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return zpl }
-
         let nsRange = NSRange(zpl.startIndex..., in: zpl)
         let matches = regex.matches(in: zpl, range: nsRange)
         guard !matches.isEmpty else { return zpl }
@@ -333,55 +187,6 @@ enum ZPLPreviewService {
 
     /// 200 ms between Labelary calls — space out requests when the user moves offset/size sliders.
     private static let labelaryRequestDelayNanoseconds: UInt64 = 200_000_000
-
-    // hits labelary over http — needs ATS exception in Info.plist
-    static func renderLabels(
-        zpl: String,
-        printerName: String = "",
-        labelSizeInches: CGSize,
-        startIndex: Int = 0,
-        count: Int = previewStripCount
-    ) async throws -> [NSImage] {
-        let labels = ZPLParser.splitLabels(from: zpl)
-        guard !labels.isEmpty else {
-            throw PreviewError.invalidZPL
-        }
-
-        let safeStart = min(max(startIndex, 0), labels.count - 1)
-        let end = min(safeStart + count, labels.count)
-        var images: [NSImage] = []
-
-        for index in safeStart..<end {
-            images.append(
-                try await renderLabel(
-                    labels[index],
-                    dpmm: ZPLLabelSize.dpmm(forPrinter: printerName),
-                    labelSizeInches: labelSizeInches
-                )
-            )
-        }
-
-        return images
-    }
-
-    static func render(
-        zpl: String,
-        printerName: String = "",
-        labelIndex: Int = 0,
-        labelSizeInches: CGSize
-    ) async throws -> NSImage {
-        let labels = ZPLParser.splitLabels(from: zpl)
-        guard !labels.isEmpty else {
-            throw PreviewError.invalidZPL
-        }
-
-        let safeIndex = min(max(labelIndex, 0), labels.count - 1)
-        return try await renderLabel(
-            labels[safeIndex],
-            dpmm: ZPLLabelSize.dpmm(forPrinter: printerName),
-            labelSizeInches: labelSizeInches
-        )
-    }
 
     /// Renders one printable label by number (1-based), using the same expansion as print.
     static func renderExpandedLabel(

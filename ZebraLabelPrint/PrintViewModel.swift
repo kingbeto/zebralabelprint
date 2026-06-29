@@ -55,10 +55,10 @@ final class PrintViewModel: ObservableObject {
     @Published var printPagesText = ""
     @Published var lastPrintedLabelCount = 0
 
-    private var previewLabels: [String] = []
     private var offsetPreviewTask: Task<Void, Never>?
     private var previewLabelTask: Task<Void, Never>?
     private var setupRefreshTask: Task<Void, Never>?
+    private var requirementsRefreshTask: Task<Void, Never>?
 
     // Printer wake-up after power-on can take several seconds; poll before giving up.
     private static let setupRefreshPollIntervalNanoseconds: UInt64 = 2_500_000_000
@@ -68,6 +68,7 @@ final class PrintViewModel: ObservableObject {
     private let horizontalOffsetKey = "horizontalOffsetMM"
     private let labelSizeKey = "selectedLabelSizeId"
     private let resolutionKey = "selectedPrintResolutionId"
+    private let hasCompletedFirstLaunchKey = "hasCompletedFirstLaunch"
     // case-insensitive match — queue names are all over the place
     private static let zebraPrinterPattern = try? NSRegularExpression(pattern: "(?i)zebra")
 
@@ -93,7 +94,17 @@ final class PrintViewModel: ObservableObject {
 
     var canPrint: Bool {
         selectedFileURL != nil
+            && labelsToPrintCount > 0
+            && hasValidPrintSelection
             && SetupRequirementsChecker.canPrint(requirements, isPrinting: isPrinting)
+    }
+
+    var hasValidPrintSelection: Bool {
+        guard labelsToPrintCount > 0 else { return false }
+        if case .success = resolvedPrintIndices() {
+            return true
+        }
+        return false
     }
 
     var isSetupChecklistComplete: Bool {
@@ -104,7 +115,23 @@ final class PrintViewModel: ObservableObject {
         if selectedFileURL == nil {
             return "Choose a label file first."
         }
+        if labelsToPrintCount == 0 {
+            return "No printable labels found in this file."
+        }
+        if case .failure(let error) = resolvedPrintIndices() {
+            return error.localizedDescription
+        }
         return SetupRequirementsChecker.printBlockedReason(requirements)
+    }
+
+    var printersForPicker: [String] {
+        let zebra = printers.filter { Self.matchesZebra($0) }
+        let other = printers.filter { !Self.matchesZebra($0) }
+        return zebra + other
+    }
+
+    func printerDisplayName(_ printer: String) -> String {
+        Self.matchesZebra(printer) ? printer : "\(printer) (non-Zebra)"
     }
 
     var needsZebraSetupHelp: Bool {
@@ -163,90 +190,14 @@ final class PrintViewModel: ObservableObject {
         }
     }
 
-    private enum LabelSelectionError: LocalizedError {
-        case empty
-        case invalidRange
-        case invalidPages(String)
-        case labelOutOfBounds(Int, Int)
-        case noLabels
-
-        var errorDescription: String? {
-            switch self {
-            case .empty:
-                return "Enter label numbers."
-            case .invalidRange:
-                return "Enter a valid from/to range."
-            case .invalidPages(let detail):
-                return detail
-            case .labelOutOfBounds(let label, let max):
-                return "Label \(label) exceeds total (\(max))."
-            case .noLabels:
-                return "No labels selected."
-            }
-        }
-    }
-
     private func resolvedPrintIndices() -> Result<[Int], LabelSelectionError> {
-        guard labelsToPrintCount > 0 else { return .failure(.noLabels) }
-
-        switch printScope {
-        case PrintLabelScope.all:
-            return .success(Array(1...labelsToPrintCount))
-
-        case PrintLabelScope.range:
-            let from = min(printRangeFrom, printRangeTo)
-            let to = max(printRangeFrom, printRangeTo)
-            guard from >= 1, to <= labelsToPrintCount, from <= to else {
-                return .failure(.invalidRange)
-            }
-            return .success(Array(from...to))
-
-        case PrintLabelScope.pages:
-            return parseLabelPages(printPagesText, maxLabel: labelsToPrintCount)
-        }
-    }
-
-    /// Parses macOS-style lists: `1`, `10`, `1, 5, 10-20`.
-    private func parseLabelPages(_ text: String, maxLabel: Int) -> Result<[Int], LabelSelectionError> {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return .failure(.empty) }
-
-        var indices = Set<Int>()
-
-        for part in trimmed.split(separator: ",") {
-            let segment = part.trimmingCharacters(in: .whitespaces)
-            if segment.isEmpty { continue }
-
-            if segment.contains("-") {
-                let bounds = segment.split(separator: "-", maxSplits: 1).map {
-                    $0.trimmingCharacters(in: .whitespaces)
-                }
-                guard bounds.count == 2,
-                      let low = Int(bounds[0]),
-                      let high = Int(bounds[1]),
-                      low >= 1,
-                      high >= low else {
-                    return .failure(.invalidPages("Invalid range: \(segment)"))
-                }
-                for number in low...high {
-                    guard number <= maxLabel else {
-                        return .failure(.labelOutOfBounds(number, maxLabel))
-                    }
-                    indices.insert(number)
-                }
-            } else {
-                guard let number = Int(segment), number >= 1 else {
-                    return .failure(.invalidPages("Invalid label: \(segment)"))
-                }
-                guard number <= maxLabel else {
-                    return .failure(.labelOutOfBounds(number, maxLabel))
-                }
-                indices.insert(number)
-            }
-        }
-
-        guard !indices.isEmpty else { return .failure(.noLabels) }
-        return .success(indices.sorted())
+        LabelSelectionParser.resolvedIndices(
+            scope: printScope,
+            labelsToPrintCount: labelsToPrintCount,
+            printRangeFrom: printRangeFrom,
+            printRangeTo: printRangeTo,
+            printPagesText: printPagesText
+        )
     }
 
     init() {
@@ -263,16 +214,25 @@ final class PrintViewModel: ObservableObject {
 
     func onAppear() {
         refreshRequirements()
-        // open file picker straight away, thats the whole point of the app
+        guard !UserDefaults.standard.bool(forKey: hasCompletedFirstLaunchKey) else { return }
+        UserDefaults.standard.set(true, forKey: hasCompletedFirstLaunchKey)
         if selectedFileURL == nil {
             selectFile()
         }
     }
 
     func refreshRequirements() {
-        isCheckingRequirements = true
-        defer { isCheckingRequirements = false }
-        applyRequirementsCheck()
+        let printer = selectedPrinter
+        requirementsRefreshTask?.cancel()
+        requirementsRefreshTask = Task {
+            isCheckingRequirements = true
+            let snapshot = await Task.detached(priority: .utility) {
+                SetupRequirementsSnapshot.gather(selectedPrinter: printer)
+            }.value
+            guard !Task.isCancelled else { return }
+            applyRequirementsCheck(snapshot)
+            isCheckingRequirements = false
+        }
     }
 
     /// Poll setup status for up to ~15 s so a printer that was just turned on can come online.
@@ -286,7 +246,11 @@ final class PrintViewModel: ObservableObject {
                 isPollingSetupStatus = false
             }
 
-            applyRequirementsCheck()
+            let printer = selectedPrinter
+            let snapshot = await Task.detached(priority: .utility) {
+                SetupRequirementsSnapshot.gather(selectedPrinter: printer)
+            }.value
+            applyRequirementsCheck(snapshot)
 
             guard !selectedPrinter.isEmpty else {
                 statusMessage = ""
@@ -305,7 +269,10 @@ final class PrintViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: Self.setupRefreshPollIntervalNanoseconds)
                 guard !Task.isCancelled else { return }
 
-                applyRequirementsCheck()
+                let pollPrinter = selectedPrinter
+                applyRequirementsCheck(await Task.detached(priority: .utility) {
+                    SetupRequirementsSnapshot.gather(selectedPrinter: pollPrinter)
+                }.value)
 
                 if isSetupChecklistComplete {
                     statusMessage = "Setup looks good."
@@ -317,24 +284,58 @@ final class PrintViewModel: ObservableObject {
         }
     }
 
-    private func applyRequirementsCheck() {
-        let cupsRunning = CUPSPrinterService.isSchedulerRunning()
-        loadPrinters()
+    private func applyRequirementsCheck(_ snapshot: SetupRequirementsSnapshot) {
+        printers = snapshot.printers
+        let printerBefore = selectedPrinter
+        reconcileSelectedPrinter()
 
-        printerQueueStatus = selectedPrinter.isEmpty
-            ? .unknown
-            : CUPSPrinterService.printerQueueStatus(selectedPrinter)
-
-        pendingJobCount = selectedPrinter.isEmpty
-            ? 0
-            : CUPSPrinterService.pendingJobCount(for: selectedPrinter)
+        if selectedPrinter.isEmpty {
+            printerQueueStatus = .unknown
+            pendingJobCount = 0
+        } else if selectedPrinter == printerBefore, selectedPrinter == snapshot.gatheredForPrinter {
+            printerQueueStatus = snapshot.printerQueueStatus
+            pendingJobCount = snapshot.pendingJobCount
+        } else {
+            printerQueueStatus = CUPSPrinterService.printerQueueStatus(selectedPrinter)
+            pendingJobCount = CUPSPrinterService.pendingJobCount(for: selectedPrinter)
+        }
 
         requirements = SetupRequirementsChecker.evaluate(
-            cupsRunning: cupsRunning,
-            zebraPrinters: CUPSPrinterService.zebraPrinterNames(),
+            cupsRunning: snapshot.cupsRunning,
+            zebraPrinters: snapshot.zebraPrinters,
             selectedPrinter: selectedPrinter,
             printerQueueStatus: selectedPrinter.isEmpty ? nil : printerQueueStatus
         )
+    }
+
+    private func reconcileSelectedPrinter() {
+        if printers.isEmpty {
+            selectedPrinter = ""
+            updatePrintDefinition()
+            return
+        }
+
+        if !selectedPrinter.isEmpty, printers.contains(selectedPrinter) {
+            updatePrintDefinition()
+            return
+        }
+
+        if let savedPrinter = UserDefaults.standard.string(forKey: lastPrinterKey),
+           printers.contains(savedPrinter) {
+            selectedPrinter = savedPrinter
+            updatePrintDefinition()
+            return
+        }
+
+        if let zebraPrinter = printers.first(where: Self.matchesZebra) {
+            selectedPrinter = zebraPrinter
+            persistPrinter(zebraPrinter)
+            updatePrintDefinition()
+            return
+        }
+
+        selectedPrinter = ""
+        updatePrintDefinition()
     }
 
     private func setupStatusSummaryAfterTimeout() -> String {
@@ -504,30 +505,7 @@ final class PrintViewModel: ObservableObject {
     }
 
     func loadPrinters() {
-        printers = CUPSPrinterService.printerNames()
-
-        if printers.isEmpty {
-            selectedPrinter = ""
-            return
-        }
-
-        if let savedPrinter = UserDefaults.standard.string(forKey: lastPrinterKey),
-           printers.contains(savedPrinter) {
-            selectedPrinter = savedPrinter
-            updatePrintDefinition()
-            return
-        }
-
-        // no saved printer — grab first zebra-ish queue if we can
-        if let zebraPrinter = printers.first(where: Self.matchesZebra) {
-            selectedPrinter = zebraPrinter
-            persistPrinter(zebraPrinter)
-            updatePrintDefinition()
-            return
-        }
-
-        selectedPrinter = ""
-        updatePrintDefinition()
+        refreshRequirements()
     }
 
     func updatePrintDefinition(for labelZPL: String? = nil) {
@@ -585,7 +563,6 @@ final class PrintViewModel: ObservableObject {
 
         selectedFileURL = url
         statusMessage = ""
-        previewLabels = []
         previewLabelNumber = 1
         refreshLabelsToPrintCount()
         refreshRequirements()
@@ -665,7 +642,6 @@ final class PrintViewModel: ObservableObject {
         }
 
         let adjustedZPL = preparedZPL(from: zpl)
-        previewLabels = ZPLParser.splitLabels(from: adjustedZPL)
         labelsToPrintCount = ZPLParser.printableLabelCount(from: adjustedZPL)
         clampPrintRange()
         clampPreviewLabelNumber()
@@ -673,7 +649,7 @@ final class PrintViewModel: ObservableObject {
         let expandedBlocks = ZPLParser.expandedLabelZPLBlocks(from: adjustedZPL)
         let previewBlock = expandedBlocks.indices.contains(previewLabelNumber - 1)
             ? expandedBlocks[previewLabelNumber - 1]
-            : previewLabels.first
+            : nil
 
         do {
             let dpmm = resolvedDpmm

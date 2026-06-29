@@ -92,65 +92,65 @@ struct ContentView: View {
                         .fontWeight(.semibold)
 
                     VStack(alignment: .leading, spacing: 8) {
-                    Text("ZPL file")
-                    .font(.headline)
+                        Text("ZPL file")
+                            .font(.headline)
 
-                HStack {
-                    Text(viewModel.selectedFileURL?.lastPathComponent ?? "No file selected")
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundStyle(viewModel.selectedFileURL == nil ? .secondary : .primary)
+                        HStack {
+                            Text(viewModel.selectedFileURL?.lastPathComponent ?? "No file selected")
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .foregroundStyle(viewModel.selectedFileURL == nil ? .secondary : .primary)
 
-                    Spacer()
+                            Spacer()
 
-                    Button("Choose…") {
-                        viewModel.selectFile()
-                    }
-                }
+                            Button("Choose…") {
+                                viewModel.selectFile()
+                            }
+                        }
 
-                if !viewModel.labelsToPrintSummary.isEmpty {
-                    Text(viewModel.labelsToPrintSummary)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Print labels")
-                        .font(.headline)
-
-                    Picker("Print labels", selection: $viewModel.printScope) {
-                        ForEach(PrintLabelScope.allCases) { scope in
-                            Text(scope.title).tag(scope)
+                        if !viewModel.labelsToPrintSummary.isEmpty {
+                            Text(viewModel.labelsToPrintSummary)
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    .pickerStyle(.radioGroup)
-                    .labelsHidden()
 
-                    PrintScopeOptionsRow(
-                        printScope: viewModel.printScope,
-                        printRangeFrom: $viewModel.printRangeFrom,
-                        printRangeTo: $viewModel.printRangeTo,
-                        printPagesText: $viewModel.printPagesText
-                    )
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Print labels")
+                            .font(.headline)
 
-                    Text(viewModel.printSelectionHint.isEmpty ? " " : viewModel.printSelectionHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: AppLayout.printScopeHintHeight,
-                            alignment: .topLeading
+                        Picker("Print labels", selection: $viewModel.printScope) {
+                            ForEach(PrintLabelScope.allCases) { scope in
+                                Text(scope.title).tag(scope)
+                            }
+                        }
+                        .pickerStyle(.radioGroup)
+                        .labelsHidden()
+
+                        PrintScopeOptionsRow(
+                            printScope: viewModel.printScope,
+                            printRangeFrom: $viewModel.printRangeFrom,
+                            printRangeTo: $viewModel.printRangeTo,
+                            printPagesText: $viewModel.printPagesText
                         )
-                        .opacity(viewModel.printSelectionHint.isEmpty ? 0 : 1)
-                }
-                .disabled(!viewModel.isPrintLabelSelectionEnabled)
-                .onChange(of: viewModel.printRangeFrom) { _ in
-                    viewModel.clampPrintRange()
-                }
-                .onChange(of: viewModel.printRangeTo) { _ in
-                    viewModel.clampPrintRange()
-                }
-            }
+
+                        Text(viewModel.printSelectionHint.isEmpty ? " " : viewModel.printSelectionHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(
+                                maxWidth: .infinity,
+                                minHeight: AppLayout.printScopeHintHeight,
+                                alignment: .topLeading
+                            )
+                            .opacity(viewModel.printSelectionHint.isEmpty ? 0 : 1)
+                    }
+                    .disabled(!viewModel.isPrintLabelSelectionEnabled)
+                    .onChange(of: viewModel.printRangeFrom) { _ in
+                        viewModel.clampPrintRange()
+                    }
+                    .onChange(of: viewModel.printRangeTo) { _ in
+                        viewModel.clampPrintRange()
+                    }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Printer")
@@ -161,8 +161,8 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     Picker("Printer", selection: $viewModel.selectedPrinter) {
-                        ForEach(viewModel.printers, id: \.self) { printer in
-                            Text(printer).tag(printer)
+                        ForEach(viewModel.printersForPicker, id: \.self) { printer in
+                            Text(viewModel.printerDisplayName(printer)).tag(printer)
                         }
                     }
                     .labelsHidden()
@@ -324,6 +324,10 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+            Text("Privacy: preview sends your label data to labelary.com over the network.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
             if viewModel.labelsToPrintCount > 1 {
                 HStack(spacing: 12) {
                     Text("Preview label")
@@ -415,9 +419,11 @@ struct ContentView: View {
     }
 }
 
+#if DEBUG
 #Preview {
     ContentView()
 }
+#endif
 
 private struct PrintScopeOptionsRow: View {
     let printScope: PrintLabelScope

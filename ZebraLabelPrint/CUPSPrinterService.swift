@@ -45,6 +45,8 @@ enum PrinterQueueStatus: Equatable {
 
 // thin wrapper around lpstat / lpr — nothing fancy here
 enum CUPSPrinterService {
+    private static let processTimeoutSeconds: TimeInterval = 30
+
     enum PrintError: LocalizedError {
         case failed(String)
 
@@ -178,12 +180,15 @@ enum CUPSPrinterService {
 
     @discardableResult
     static func printRaw(zplData: Data, to printer: String) -> Result<PrintSubmissionResult, PrintError> {
-        guard printerNames().contains(printer) else {
-            return .failure(.failed("Printer \"\(printer)\" was not found. Available: \(printerNames().joined(separator: ", "))"))
+        let availablePrinters = printerNames()
+        guard availablePrinters.contains(printer) else {
+            return .failure(.failed(
+                "Printer \"\(printer)\" was not found. Available: \(availablePrinters.joined(separator: ", "))"
+            ))
         }
 
-        _ = resumePrinterQueue(printer)
         let wasPaused = printerQueueStatus(printer) != .ready
+        _ = resumePrinterQueue(printer)
 
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("zebra-print-\(UUID().uuidString).zpl")
@@ -208,9 +213,7 @@ enum CUPSPrinterService {
         process.standardOutput = FileHandle.nullDevice
 
         do {
-            try process.run()
-            process.waitUntilExit()
-
+            try runProcess(process)
             if process.terminationStatus == 0 {
                 if wasPaused || printerQueueStatus(printer) != .ready {
                     return .success(.queuedWhilePaused)
@@ -238,12 +241,22 @@ enum CUPSPrinterService {
         process.standardError = FileHandle.nullDevice
 
         do {
-            try process.run()
-            process.waitUntilExit()
+            try runProcess(process)
             guard process.terminationStatus == 0 else { return nil }
             return readPipe(outputPipe)
         } catch {
             return nil
+        }
+    }
+
+    private static func runProcess(_ process: Process) throws {
+        let group = DispatchGroup()
+        group.enter()
+        process.terminationHandler = { _ in group.leave() }
+        try process.run()
+        if group.wait(timeout: .now() + processTimeoutSeconds) == .timedOut {
+            process.terminate()
+            throw PrintError.failed("Command timed out after \(Int(processTimeoutSeconds)) seconds.")
         }
     }
 
@@ -304,5 +317,29 @@ enum CUPSPrinterService {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         return String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+}
+
+struct SetupRequirementsSnapshot {
+    let gatheredForPrinter: String
+    let cupsRunning: Bool
+    let printers: [String]
+    let zebraPrinters: [String]
+    let printerQueueStatus: PrinterQueueStatus
+    let pendingJobCount: Int
+
+    static func gather(selectedPrinter: String) -> SetupRequirementsSnapshot {
+        SetupRequirementsSnapshot(
+            gatheredForPrinter: selectedPrinter,
+            cupsRunning: CUPSPrinterService.isSchedulerRunning(),
+            printers: CUPSPrinterService.printerNames(),
+            zebraPrinters: CUPSPrinterService.zebraPrinterNames(),
+            printerQueueStatus: selectedPrinter.isEmpty
+                ? .unknown
+                : CUPSPrinterService.printerQueueStatus(selectedPrinter),
+            pendingJobCount: selectedPrinter.isEmpty
+                ? 0
+                : CUPSPrinterService.pendingJobCount(for: selectedPrinter)
+        )
     }
 }

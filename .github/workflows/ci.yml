@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  build-and-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and test
+        run: |
+          export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+          xcodebuild \
+            -project ZebraLabelPrint.xcodeproj \
+            -scheme ZebraLabelPrint \
+            -destination 'platform=macOS' \
+            -configuration Debug \
+            build test

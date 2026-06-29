@@ -8,7 +8,9 @@ Developer documentation for building, extending, and debugging the app.
 ZebraLabelPrint/
 ├── ZebraLabelPrintApp.swift      @main entry point
 ├── ContentView.swift             SwiftUI layout, setup checklist UI
-├── PrintViewModel.swift          State, persistence, print/preview orchestration, print label selection
+├── PrintViewModel.swift          State, persistence, print/preview orchestration
+├── LabelSelectionParser.swift    Print scope parsing (all / range / pages)
+├── PrinterDpmm.swift             DPMM inference from CUPS queue name
 ├── CUPSPrinterService.swift      lpstat / lpr, queue status, pause/resume/cancel, CUPS restart
 ├── SetupRequirements.swift       Setup checklist rules and Zebra driver links
 ├── ZPLPreviewService.swift       Labelary API, ZPL parsing, offset, label count, print resolution
@@ -16,13 +18,18 @@ ZebraLabelPrint/
 ├── ZebraLabelPrint.entitlements  Hardened runtime (not App Store sandboxed)
 ├── Info.plist                    ATS exception for api.labelary.com (HTTP)
 └── Assets.xcassets/
+
+ZebraLabelPrintTests/
+├── ZPLParserTests.swift
+├── ZPLModifierTests.swift
+└── LabelSelectionParserTests.swift
 ```
 
 - **Xcode project:** `ZebraLabelPrint.xcodeproj`
 - **Target / scheme:** `ZebraLabelPrint`
 - **Bundle ID:** `com.zebra.ZebraLabelPrint`
 - **Deployment target:** macOS 13
-- **Architecture:** arm64 only (Apple silicon). Builds on Apple silicon Macs produce an arm64 binary; there is no Intel (x86_64) slice.
+- **Architecture:** arm64 only (`ARCHS = arm64` on the app target; `i386` excluded)
 - **Window size:** 1640 × 1040 default; sidebar controls column 460 pt wide; preview fills remaining width
 
 ## UI layout (`ContentView.swift`)
@@ -91,7 +98,7 @@ The ↻ control restarts CUPS with `launchctl kickstart -k system/org.cups.cupsd
 
 ## Label counting and expansion
 
-`ZPLParser.printableLabelCount(from:)` returns `expandedLabelZPLBlocks(from:).count` (minimum 1).
+`ZPLParser.printableLabelCount(from:)` returns `0` when the file is empty or contains no `^XA`. Otherwise it returns `expandedLabelZPLBlocks(from:).count`.
 
 `expandedLabelZPLBlocks(from:)`:
 
@@ -99,9 +106,7 @@ The ↻ control restarts CUPS with `launchctl kickstart -k system/org.cups.cupsd
 2. Read `^PQ` per block (default 1)
 3. Normalize each block to `^PQ1` and repeat it `^PQ` times — one array entry per **physical** label
 
-Legacy `labelCount(from:)` still exists for heuristics; UI and printing use the expanded list.
-
-Printing sends only the ZPL for indices chosen in **Print labels** via `buildPrintZPL(from:oneBasedIndices:)`.
+Printing sends only the ZPL for indices chosen in **Print labels** via `buildPrintZPL(from:oneBasedIndices:)`. Parsing lives in `LabelSelectionParser.swift`.
 
 ## Preview
 
@@ -112,7 +117,18 @@ Preview is rendered by the [Labelary](http://labelary.com) API (`api.labelary.co
 3. Uses the user-selected label size for aspect ratio in `LabelPreviewContainer`
 4. Uses `resolvedDpmm` from the print resolution picker for Labelary `dpmm` and offset
 
-`Info.plist` includes an App Transport Security exception for HTTP access to Labelary.
+`Info.plist` includes an App Transport Security exception for HTTP access to Labelary. The preview panel discloses that label data is sent to labelary.com.
+
+## Testing
+
+Unit tests live in **ZebraLabelPrintTests** (XCTest). Run from Xcode (**⌘U**) or:
+
+```bash
+export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+xcodebuild -project ZebraLabelPrint.xcodeproj -scheme ZebraLabelPrint -destination 'platform=macOS' test
+```
+
+Coverage includes `ZPLParser`, `ZPLModifier`, and `LabelSelectionParser`. CI runs the same command on push (`.github/workflows/ci.yml`).
 
 ## Persistence (UserDefaults)
 
@@ -212,6 +228,8 @@ For a drag-to-Applications installer with background art:
 ```bash
 ./scripts/make-dmg.sh
 ```
+
+Requires **ImageMagick** (`magick` on `PATH`) for the DMG background. Install with `brew install imagemagick` if needed.
 
 Output: `dist/ZebraLabelPrint-arm64.dmg`
 
@@ -319,12 +337,16 @@ The icon is from [The Noun Project](https://thenounproject.com/) (zebra illustra
 | Labelary limit | One label per preview request; 200 ms delay before each API call |
 | Label expansion | `^PQ` copies expand to one block per physical label; print uses selected indices |
 | Print label UI | Always visible; disabled when `labelsToPrintCount <= 1` or no file |
+| `wasPaused` print hint | Queue status captured **before** auto-resume in `printRaw` |
+| Process timeout | `lpr` / `lpstat` subprocesses time out after 30 seconds |
+| CUPS requirements | Gathered off the main thread via `SetupRequirementsSnapshot` |
 | Horizontal offset | Shift `^FO` / `^FT` / `^GB` / `^GC` X coordinates, not `^LS` |
 | Print resolution | Preview and offset only; printer native DPI unchanged |
 | CUPS queue UI | Pause / resume / cancel via `cupsdisable`, `cupsenable`, `cancel -a` |
 | CUPS locale | `lpstat -r` output is localized; parse text, not English-only strings |
 | SwiftUI `onChange` | Single-parameter form for macOS 13 compatibility |
 | SourceKit / IDE | Optional `buildServer.json` at repo root for Xcode project indexing |
+| First-launch file picker | `hasCompletedFirstLaunch` is set before `NSOpenPanel` runs; canceling on first open does not auto-prompt again — use **Choose…** |
 
 ## Discoverability (SEO)
 
