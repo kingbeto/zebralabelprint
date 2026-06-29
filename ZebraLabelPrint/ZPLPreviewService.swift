@@ -34,6 +34,34 @@ struct ZebraLabelSizeOption: Identifiable, Hashable {
     ]
 }
 
+struct ZebraPrintResolutionOption: Identifiable, Hashable {
+    let id: String
+    let dpmm: Int?
+    let name: String
+
+    static let defaultOption = allOptions[0]
+
+    static func option(id: String) -> ZebraPrintResolutionOption {
+        allOptions.first { $0.id == id } ?? defaultOption
+    }
+
+    /// `dpmm` is nil for Auto — resolved from the printer queue name.
+    static let allOptions: [ZebraPrintResolutionOption] = [
+        ZebraPrintResolutionOption(id: "auto", dpmm: nil, name: "Auto (from printer name)"),
+        ZebraPrintResolutionOption(id: "8", dpmm: 8, name: "203 dpi · 8 dpmm"),
+        ZebraPrintResolutionOption(id: "12", dpmm: 12, name: "300 dpi · 12 dpmm"),
+        ZebraPrintResolutionOption(id: "24", dpmm: 24, name: "600 dpi · 24 dpmm"),
+    ]
+
+    static func resolvedDpmm(optionId: String, printerName: String) -> Int {
+        let option = option(id: optionId)
+        if let dpmm = option.dpmm {
+            return dpmm
+        }
+        return ZPLLabelSize.dpmm(forPrinter: printerName)
+    }
+}
+
 struct ZPLLabelSize {
     let dpmm: Int
     let widthInches: Double
@@ -210,6 +238,48 @@ enum ZPLParser {
         guard let regex = try? NSRegularExpression(pattern: "(?i)\\^XA") else { return 0 }
         return regex.numberOfMatches(in: zpl, range: NSRange(zpl.startIndex..., in: zpl))
     }
+
+    /// One ZPL block per printed label, expanding `^PQ` copies.
+    static func expandedLabelZPLBlocks(from zpl: String) -> [String] {
+        let blocks = splitLabels(from: zpl)
+        let sections = blocks.isEmpty ? [zpl] : blocks
+        var expanded: [String] = []
+
+        for block in sections {
+            let quantity = printQuantity(in: block)
+            let singleCopy = normalizeToSingleCopy(block)
+            for _ in 0..<quantity {
+                expanded.append(singleCopy)
+            }
+        }
+
+        if !expanded.isEmpty {
+            return expanded
+        }
+        return [zpl]
+    }
+
+    static func buildPrintZPL(from zpl: String, oneBasedIndices: [Int]) -> String {
+        let expanded = expandedLabelZPLBlocks(from: zpl)
+        let parts = oneBasedIndices.compactMap { index -> String? in
+            guard index >= 1, index <= expanded.count else { return nil }
+            return expanded[index - 1]
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// Labels you can target when printing (one entry per physical output).
+    static func printableLabelCount(from zpl: String) -> Int {
+        max(expandedLabelZPLBlocks(from: zpl).count, 1)
+    }
+
+    private static func normalizeToSingleCopy(_ block: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: "(?i)\\^PQ\\d+") else {
+            return block
+        }
+        let range = NSRange(block.startIndex..., in: block)
+        return regex.stringByReplacingMatches(in: block, range: range, withTemplate: "^PQ1")
+    }
 }
 
 enum ZPLModifier {
@@ -285,7 +355,7 @@ enum ZPLPreviewService {
             images.append(
                 try await renderLabel(
                     labels[index],
-                    printerName: printerName,
+                    dpmm: ZPLLabelSize.dpmm(forPrinter: printerName),
                     labelSizeInches: labelSizeInches
                 )
             )
@@ -308,14 +378,32 @@ enum ZPLPreviewService {
         let safeIndex = min(max(labelIndex, 0), labels.count - 1)
         return try await renderLabel(
             labels[safeIndex],
-            printerName: printerName,
+            dpmm: ZPLLabelSize.dpmm(forPrinter: printerName),
+            labelSizeInches: labelSizeInches
+        )
+    }
+
+    /// Renders one printable label by number (1-based), using the same expansion as print.
+    static func renderExpandedLabel(
+        atOneBasedIndex index: Int,
+        zpl: String,
+        dpmm: Int,
+        labelSizeInches: CGSize
+    ) async throws -> NSImage {
+        let blocks = ZPLParser.expandedLabelZPLBlocks(from: zpl)
+        guard index >= 1, index <= blocks.count else {
+            throw PreviewError.invalidZPL
+        }
+        return try await renderLabel(
+            blocks[index - 1],
+            dpmm: dpmm,
             labelSizeInches: labelSizeInches
         )
     }
 
     private static func renderLabel(
         _ labelZPL: String,
-        printerName: String,
+        dpmm: Int,
         labelSizeInches: CGSize
     ) async throws -> NSImage {
         // Pace every Labelary POST — renderLabel is the single entry point for HTTP previews.
@@ -325,7 +413,6 @@ enum ZPLPreviewService {
             throw PreviewError.invalidZPL
         }
 
-        let dpmm = ZPLLabelSize.dpmm(forPrinter: printerName)
         let urlString = String(
             format: "http://api.labelary.com/v1/printers/%ddpmm/labels/%.3fx%.3f/0/",
             dpmm,

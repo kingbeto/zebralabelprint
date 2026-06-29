@@ -141,6 +141,31 @@ enum CUPSPrinterService {
         return printerQueueStatus(printer) == .ready
     }
 
+    @discardableResult
+    static func pausePrinterQueue(_ printer: String) -> Bool {
+        guard !printer.isEmpty else { return false }
+        _ = runCommand(executable: "/usr/sbin/cupsdisable", arguments: [printer])
+        return printerQueueStatus(printer) == .paused
+    }
+
+    @discardableResult
+    static func cancelAllJobs(on printer: String) -> Bool {
+        guard !printer.isEmpty else { return false }
+        return runCommand(executable: "/usr/bin/cancel", arguments: ["-a", printer]) != nil
+            || pendingJobCount(for: printer) == 0
+    }
+
+    static func pendingJobCount(for printer: String) -> Int {
+        guard !printer.isEmpty,
+              let output = runCommand(executable: "/usr/bin/lpstat", arguments: ["-o", printer]) else {
+            return 0
+        }
+        return output
+            .split(separator: "\n")
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .count
+    }
+
     private static func parseQueueNames(from output: String) -> [String] {
         output
             .split(separator: "\n")

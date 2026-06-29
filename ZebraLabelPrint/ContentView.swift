@@ -5,6 +5,15 @@ private enum AppTitle {
     static let name = "Zebra Label Print"
 }
 
+private enum AppLayout {
+    static let controlsWidth: CGFloat = 460
+    static let panelPadding: CGFloat = 24
+    static let minWindowWidth: CGFloat = 1280
+    static let minWindowHeight: CGFloat = 1040
+    static let printScopeOptionsHeight: CGFloat = 28
+    static let printScopeHintHeight: CGFloat = 32
+}
+
 struct ContentView: View {
     @StateObject private var viewModel = PrintViewModel()
     @State private var isChecklistManuallyExpanded = false
@@ -16,15 +25,15 @@ struct ContentView: View {
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
             controlsPanel
-                .frame(width: 380) // fixed sidebar, preview takes the rest
-                .padding(24)
+                .frame(width: AppLayout.controlsWidth)
+                .padding(AppLayout.panelPadding)
 
             Divider()
 
             previewPanel
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 1640, minHeight: 1040)
+        .frame(minWidth: AppLayout.minWindowWidth, minHeight: AppLayout.minWindowHeight)
         .onAppear {
             viewModel.onAppear()
             updateWindowTitle()
@@ -43,6 +52,11 @@ struct ContentView: View {
             viewModel.updatePrintDefinition()
             Task { await viewModel.loadPreview() }
         }
+        .onChange(of: viewModel.selectedResolutionId) { _ in
+            viewModel.persistResolution()
+            viewModel.updatePrintDefinition()
+            Task { await viewModel.loadPreview() }
+        }
         .onChange(of: viewModel.horizontalOffsetMM) { _ in
             viewModel.persistHorizontalOffset()
             viewModel.schedulePreviewRefresh()
@@ -57,7 +71,7 @@ struct ContentView: View {
             Button("Close", role: .cancel) {}
         } message: {
             if let file = viewModel.selectedFileURL {
-                let count = viewModel.labelsToPrintCount
+                let count = viewModel.lastPrintedLabelCount
                 let labelPhrase = count == 1 ? "1 label" : "\(count) labels"
                 Text("\"\(file.lastPathComponent)\" (\(labelPhrase)) was sent to \(viewModel.selectedPrinter).")
             }
@@ -99,6 +113,43 @@ struct ContentView: View {
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Print labels")
+                        .font(.headline)
+
+                    Picker("Print labels", selection: $viewModel.printScope) {
+                        ForEach(PrintLabelScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+
+                    PrintScopeOptionsRow(
+                        printScope: viewModel.printScope,
+                        printRangeFrom: $viewModel.printRangeFrom,
+                        printRangeTo: $viewModel.printRangeTo,
+                        printPagesText: $viewModel.printPagesText
+                    )
+
+                    Text(viewModel.printSelectionHint.isEmpty ? " " : viewModel.printSelectionHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: AppLayout.printScopeHintHeight,
+                            alignment: .topLeading
+                        )
+                        .opacity(viewModel.printSelectionHint.isEmpty ? 0 : 1)
+                }
+                .disabled(!viewModel.isPrintLabelSelectionEnabled)
+                .onChange(of: viewModel.printRangeFrom) { _ in
+                    viewModel.clampPrintRange()
+                }
+                .onChange(of: viewModel.printRangeTo) { _ in
+                    viewModel.clampPrintRange()
+                }
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -130,6 +181,28 @@ struct ContentView: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Print resolution")
+                    .font(.headline)
+
+                Picker("Print resolution", selection: $viewModel.selectedResolutionId) {
+                    ForEach(ZebraPrintResolutionOption.allOptions) { option in
+                        Text(option.name).tag(option.id)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+
+                Text(viewModel.resolutionSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("Preview and horizontal offset use this setting. The printer uses its own native resolution for output.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             VStack(alignment: .leading, spacing: 8) {
@@ -207,9 +280,12 @@ struct ContentView: View {
                 if !viewModel.selectedPrinter.isEmpty {
                     PrinterQueueStatusBanner(
                         status: viewModel.printerQueueStatus,
+                        pendingJobCount: viewModel.pendingJobCount,
                         isRefreshing: viewModel.isCheckingRequirements,
                         onRefresh: { viewModel.refreshSetupStatus() },
-                        onResume: { viewModel.resumeSelectedPrinter() }
+                        onResume: { viewModel.resumeSelectedPrinter() },
+                        onPause: { viewModel.pauseSelectedPrinter() },
+                        onCancelJobs: { viewModel.cancelSelectedPrinterJobs() }
                     )
                 }
 
@@ -228,7 +304,6 @@ struct ContentView: View {
                 )
             }
         }
-        .padding(24)
     }
 
     private var previewPanel: some View {
@@ -248,6 +323,46 @@ struct ContentView: View {
             Text("Rendered with Labelary. Output on your Zebra may differ slightly.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            if viewModel.labelsToPrintCount > 1 {
+                HStack(spacing: 12) {
+                    Text("Preview label")
+                        .font(.subheadline)
+
+                    Spacer()
+
+                    Button {
+                        viewModel.stepPreviewLabel(by: -1)
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(viewModel.previewLabelNumber <= 1 || viewModel.isLoadingPreview)
+
+                    TextField("Label", value: $viewModel.previewLabelNumber, format: .number)
+                        .frame(width: 52)
+                        .multilineTextAlignment(.center)
+                        .disabled(viewModel.isLoadingPreview)
+
+                    Text("of \(viewModel.labelsToPrintCount)")
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        viewModel.stepPreviewLabel(by: 1)
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(
+                        viewModel.previewLabelNumber >= viewModel.labelsToPrintCount
+                            || viewModel.isLoadingPreview
+                    )
+                }
+                .onChange(of: viewModel.previewLabelNumber) { _ in
+                    viewModel.clampPreviewLabelNumber()
+                    viewModel.schedulePreviewLabelRefresh()
+                }
+            }
 
             if !viewModel.previewLabelInfo.isEmpty {
                 Text(viewModel.previewLabelInfo)
@@ -289,7 +404,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding(24)
+        .padding(AppLayout.panelPadding)
     }
 
     private func updateWindowTitle() {
@@ -302,6 +417,37 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+}
+
+private struct PrintScopeOptionsRow: View {
+    let printScope: PrintLabelScope
+    @Binding var printRangeFrom: Int
+    @Binding var printRangeTo: Int
+    @Binding var printPagesText: String
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            switch printScope {
+            case .all:
+                Color.clear
+            case .range:
+                HStack(spacing: 8) {
+                    Text("From")
+                    TextField("From", value: $printRangeFrom, format: .number)
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
+                    Text("to")
+                    TextField("To", value: $printRangeTo, format: .number)
+                        .frame(width: 56)
+                        .multilineTextAlignment(.trailing)
+                }
+            case .pages:
+                TextField("e.g. 1, 10, 15-20", text: $printPagesText)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: AppLayout.printScopeOptionsHeight, alignment: .leading)
+    }
 }
 
 private struct RequirementsPanel: View {
@@ -461,50 +607,77 @@ private struct RequirementsPanel: View {
 
 private struct PrinterQueueStatusBanner: View {
     let status: PrinterQueueStatus
+    let pendingJobCount: Int
     let isRefreshing: Bool
     let onRefresh: () -> Void
     let onResume: () -> Void
+    let onPause: () -> Void
+    let onCancelJobs: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: iconName)
-                .foregroundStyle(iconColor)
-                .font(.title3)
-                .frame(width: 24)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: iconName)
+                    .foregroundStyle(iconColor)
+                    .font(.title3)
+                    .frame(width: 24)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(status.shortLabel)
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(status.shortLabel)
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
 
-                Text(status.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+                    Text(status.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
 
-            Spacer(minLength: 0)
-
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.small)
-            }
-
-            Button {
-                onRefresh()
-            } label: {
-                Image(systemName: "arrow.clockwise.circle")
-            }
-            .buttonStyle(.borderless)
-            .help("Refresh queue status (polls for up to 15 seconds)")
-            .disabled(isRefreshing)
-
-            if status == .paused {
-                Button("Resume") {
-                    onResume()
+                    if pendingJobCount > 0 {
+                        Text(pendingJobCount == 1 ? "1 job in queue" : "\(pendingJobCount) jobs in queue")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .controlSize(.small)
+
+                Spacer(minLength: 0)
+
+                if isRefreshing {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+
+                Button {
+                    onRefresh()
+                } label: {
+                    Image(systemName: "arrow.clockwise.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Refresh queue status (polls for up to 15 seconds)")
                 .disabled(isRefreshing)
+            }
+
+            HStack(spacing: 8) {
+                if status == .paused {
+                    Button("Resume") {
+                        onResume()
+                    }
+                    .controlSize(.small)
+                    .disabled(isRefreshing)
+                } else if status == .ready {
+                    Button("Pause") {
+                        onPause()
+                    }
+                    .controlSize(.small)
+                    .disabled(isRefreshing)
+                }
+
+                if pendingJobCount > 0 {
+                    Button("Cancel jobs") {
+                        onCancelJobs()
+                    }
+                    .controlSize(.small)
+                    .disabled(isRefreshing)
+                }
             }
         }
         .padding(10)

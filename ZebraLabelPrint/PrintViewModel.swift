@@ -2,6 +2,25 @@ import AppKit
 import Foundation
 import UniformTypeIdentifiers
 
+enum PrintLabelScope: String, CaseIterable, Identifiable {
+    case all
+    case range
+    case pages
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all:
+            return "All labels"
+        case .range:
+            return "From … to …"
+        case .pages:
+            return "Labels"
+        }
+    }
+}
+
 @MainActor
 final class PrintViewModel: ObservableObject {
     @Published var selectedFileURL: URL?
@@ -18,18 +37,27 @@ final class PrintViewModel: ObservableObject {
     @Published var previewError = ""
     @Published var previewLabelInfo = ""
     @Published var previewLimitMessage = ""
+    @Published var previewLabelNumber = 1
     @Published var labelsToPrintCount = 0
     @Published var horizontalOffsetMM: Double = 0
     @Published var printDefinitionInfo = ""
     @Published var selectedLabelSizeId: String = ZebraLabelSizeOption.defaultSize.id
+    @Published var selectedResolutionId: String = ZebraPrintResolutionOption.defaultOption.id
     @Published var requirements: [SetupRequirement] = []
     @Published var isCheckingRequirements = false
     @Published var isPollingSetupStatus = false
     @Published var isRestartingCUPS = false
     @Published var printerQueueStatus: PrinterQueueStatus = .unknown
+    @Published var pendingJobCount = 0
+    @Published var printScope: PrintLabelScope = PrintLabelScope.all
+    @Published var printRangeFrom = 1
+    @Published var printRangeTo = 1
+    @Published var printPagesText = ""
+    @Published var lastPrintedLabelCount = 0
 
     private var previewLabels: [String] = []
     private var offsetPreviewTask: Task<Void, Never>?
+    private var previewLabelTask: Task<Void, Never>?
     private var setupRefreshTask: Task<Void, Never>?
 
     // Printer wake-up after power-on can take several seconds; poll before giving up.
@@ -39,11 +67,28 @@ final class PrintViewModel: ObservableObject {
     private let lastPrinterKey = "lastSelectedPrinter"
     private let horizontalOffsetKey = "horizontalOffsetMM"
     private let labelSizeKey = "selectedLabelSizeId"
+    private let resolutionKey = "selectedPrintResolutionId"
     // case-insensitive match — queue names are all over the place
     private static let zebraPrinterPattern = try? NSRegularExpression(pattern: "(?i)zebra")
 
     var selectedLabelSize: ZebraLabelSizeOption {
         ZebraLabelSizeOption.option(id: selectedLabelSizeId)
+    }
+
+    var resolvedDpmm: Int {
+        ZebraPrintResolutionOption.resolvedDpmm(
+            optionId: selectedResolutionId,
+            printerName: selectedPrinter
+        )
+    }
+
+    var resolutionSummary: String {
+        let dpmm = resolvedDpmm
+        let dpi = Int((Double(dpmm) * 25.4).rounded())
+        if selectedResolutionId == ZebraPrintResolutionOption.defaultOption.id {
+            return "Using \(dpi) dpi (\(dpmm) dpmm), detected from printer."
+        }
+        return "Using \(dpi) dpi (\(dpmm) dpmm)."
     }
 
     var canPrint: Bool {
@@ -68,10 +113,140 @@ final class PrintViewModel: ObservableObject {
 
     var labelsToPrintSummary: String {
         guard labelsToPrintCount > 0 else { return "" }
-        if labelsToPrintCount == 1 {
-            return "Will print 1 label."
+        let selected = selectedPrintLabelCount
+        if printScope == PrintLabelScope.all || selected == labelsToPrintCount {
+            if labelsToPrintCount == 1 {
+                return "Will print 1 label."
+            }
+            return "Will print \(labelsToPrintCount) labels."
         }
-        return "Will print \(labelsToPrintCount) labels."
+        if selected == 1 {
+            return "Will print 1 of \(labelsToPrintCount) labels."
+        }
+        return "Will print \(selected) of \(labelsToPrintCount) labels."
+    }
+
+    var selectedPrintLabelCount: Int {
+        guard labelsToPrintCount > 0 else { return 0 }
+        switch resolvedPrintIndices() {
+        case .success(let indices):
+            return indices.count
+        case .failure:
+            return 0
+        }
+    }
+
+    var isPrintLabelSelectionEnabled: Bool {
+        selectedFileURL != nil && labelsToPrintCount > 1
+    }
+
+    var printSelectionHint: String {
+        if selectedFileURL == nil {
+            return "Choose a ZPL file first."
+        }
+        if labelsToPrintCount == 1 {
+            return "This file contains only one label."
+        }
+        if labelsToPrintCount == 0 {
+            if isLoadingPreview {
+                return "Loading label count…"
+            }
+            return "No printable labels found in this file."
+        }
+        switch printScope {
+        case PrintLabelScope.all:
+            return ""
+        case PrintLabelScope.range:
+            return "Prints labels \(printRangeFrom) through \(printRangeTo)."
+        case PrintLabelScope.pages:
+            return "Examples: 1 · 10 · 1, 5, 10-20"
+        }
+    }
+
+    private enum LabelSelectionError: LocalizedError {
+        case empty
+        case invalidRange
+        case invalidPages(String)
+        case labelOutOfBounds(Int, Int)
+        case noLabels
+
+        var errorDescription: String? {
+            switch self {
+            case .empty:
+                return "Enter label numbers."
+            case .invalidRange:
+                return "Enter a valid from/to range."
+            case .invalidPages(let detail):
+                return detail
+            case .labelOutOfBounds(let label, let max):
+                return "Label \(label) exceeds total (\(max))."
+            case .noLabels:
+                return "No labels selected."
+            }
+        }
+    }
+
+    private func resolvedPrintIndices() -> Result<[Int], LabelSelectionError> {
+        guard labelsToPrintCount > 0 else { return .failure(.noLabels) }
+
+        switch printScope {
+        case PrintLabelScope.all:
+            return .success(Array(1...labelsToPrintCount))
+
+        case PrintLabelScope.range:
+            let from = min(printRangeFrom, printRangeTo)
+            let to = max(printRangeFrom, printRangeTo)
+            guard from >= 1, to <= labelsToPrintCount, from <= to else {
+                return .failure(.invalidRange)
+            }
+            return .success(Array(from...to))
+
+        case PrintLabelScope.pages:
+            return parseLabelPages(printPagesText, maxLabel: labelsToPrintCount)
+        }
+    }
+
+    /// Parses macOS-style lists: `1`, `10`, `1, 5, 10-20`.
+    private func parseLabelPages(_ text: String, maxLabel: Int) -> Result<[Int], LabelSelectionError> {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .failure(.empty) }
+
+        var indices = Set<Int>()
+
+        for part in trimmed.split(separator: ",") {
+            let segment = part.trimmingCharacters(in: .whitespaces)
+            if segment.isEmpty { continue }
+
+            if segment.contains("-") {
+                let bounds = segment.split(separator: "-", maxSplits: 1).map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                }
+                guard bounds.count == 2,
+                      let low = Int(bounds[0]),
+                      let high = Int(bounds[1]),
+                      low >= 1,
+                      high >= low else {
+                    return .failure(.invalidPages("Invalid range: \(segment)"))
+                }
+                for number in low...high {
+                    guard number <= maxLabel else {
+                        return .failure(.labelOutOfBounds(number, maxLabel))
+                    }
+                    indices.insert(number)
+                }
+            } else {
+                guard let number = Int(segment), number >= 1 else {
+                    return .failure(.invalidPages("Invalid label: \(segment)"))
+                }
+                guard number <= maxLabel else {
+                    return .failure(.labelOutOfBounds(number, maxLabel))
+                }
+                indices.insert(number)
+            }
+        }
+
+        guard !indices.isEmpty else { return .failure(.noLabels) }
+        return .success(indices.sorted())
     }
 
     init() {
@@ -79,6 +254,10 @@ final class PrintViewModel: ObservableObject {
         if let savedSizeId = UserDefaults.standard.string(forKey: labelSizeKey),
            ZebraLabelSizeOption.standardSizes.contains(where: { $0.id == savedSizeId }) {
             selectedLabelSizeId = savedSizeId
+        }
+        if let savedResolutionId = UserDefaults.standard.string(forKey: resolutionKey),
+           ZebraPrintResolutionOption.allOptions.contains(where: { $0.id == savedResolutionId }) {
+            selectedResolutionId = savedResolutionId
         }
     }
 
@@ -145,6 +324,10 @@ final class PrintViewModel: ObservableObject {
         printerQueueStatus = selectedPrinter.isEmpty
             ? .unknown
             : CUPSPrinterService.printerQueueStatus(selectedPrinter)
+
+        pendingJobCount = selectedPrinter.isEmpty
+            ? 0
+            : CUPSPrinterService.pendingJobCount(for: selectedPrinter)
 
         requirements = SetupRequirementsChecker.evaluate(
             cupsRunning: cupsRunning,
@@ -223,6 +406,43 @@ final class PrintViewModel: ObservableObject {
         }
     }
 
+    func pauseSelectedPrinter() {
+        guard !selectedPrinter.isEmpty else { return }
+
+        if CUPSPrinterService.pausePrinterQueue(selectedPrinter) {
+            statusMessage = "Printer queue paused."
+            refreshRequirements()
+        } else {
+            errorMessage = "Could not pause \"\(selectedPrinter)\"."
+            showErrorAlert = true
+        }
+    }
+
+    func cancelSelectedPrinterJobs() {
+        guard !selectedPrinter.isEmpty else { return }
+
+        if CUPSPrinterService.cancelAllJobs(on: selectedPrinter) {
+            statusMessage = "Queued jobs cancelled."
+            refreshRequirements()
+        } else {
+            errorMessage = "Could not cancel jobs on \"\(selectedPrinter)\"."
+            showErrorAlert = true
+        }
+    }
+
+    func clampPrintRange() {
+        guard labelsToPrintCount > 0 else {
+            printRangeFrom = 1
+            printRangeTo = 1
+            return
+        }
+        printRangeFrom = min(max(printRangeFrom, 1), labelsToPrintCount)
+        printRangeTo = min(max(printRangeTo, 1), labelsToPrintCount)
+        if printRangeFrom > printRangeTo {
+            swap(&printRangeFrom, &printRangeTo)
+        }
+    }
+
     func resetHorizontalOffset() {
         horizontalOffsetMM = 0
         persistHorizontalOffset()
@@ -231,6 +451,10 @@ final class PrintViewModel: ObservableObject {
 
     func persistLabelSize() {
         UserDefaults.standard.set(selectedLabelSizeId, forKey: labelSizeKey)
+    }
+
+    func persistResolution() {
+        UserDefaults.standard.set(selectedResolutionId, forKey: resolutionKey)
     }
 
     func persistHorizontalOffset() {
@@ -247,12 +471,35 @@ final class PrintViewModel: ObservableObject {
         }
     }
 
+    func schedulePreviewLabelRefresh() {
+        previewLabelTask?.cancel()
+        // One Labelary call per label jump — debounce typing in the number field.
+        previewLabelTask = Task {
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            guard !Task.isCancelled else { return }
+            await loadPreview()
+        }
+    }
+
+    func stepPreviewLabel(by delta: Int) {
+        guard labelsToPrintCount > 0 else { return }
+        previewLabelNumber = min(max(previewLabelNumber + delta, 1), labelsToPrintCount)
+        schedulePreviewLabelRefresh()
+    }
+
+    func clampPreviewLabelNumber() {
+        guard labelsToPrintCount > 0 else {
+            previewLabelNumber = 1
+            return
+        }
+        previewLabelNumber = min(max(previewLabelNumber, 1), labelsToPrintCount)
+    }
+
     private func preparedZPL(from zpl: String) -> String {
-        let dpmm = ZPLLabelSize.dpmm(forPrinter: selectedPrinter)
         return ZPLModifier.applyHorizontalOffset(
             to: zpl,
             offsetMM: horizontalOffsetMM,
-            dpmm: dpmm
+            dpmm: resolvedDpmm
         )
     }
 
@@ -284,7 +531,7 @@ final class PrintViewModel: ObservableObject {
     }
 
     func updatePrintDefinition(for labelZPL: String? = nil) {
-        let dpmm = ZPLLabelSize.dpmm(forPrinter: selectedPrinter)
+        let dpmm = resolvedDpmm
         let dpi = Int((Double(dpmm) * 25.4).rounded())
         let size = selectedLabelSize
 
@@ -339,6 +586,7 @@ final class PrintViewModel: ObservableObject {
         selectedFileURL = url
         statusMessage = ""
         previewLabels = []
+        previewLabelNumber = 1
         refreshLabelsToPrintCount()
         refreshRequirements()
         Task { await loadPreview() }
@@ -350,7 +598,9 @@ final class PrintViewModel: ObservableObject {
             labelsToPrintCount = 0
             return
         }
-        labelsToPrintCount = ZPLParser.labelCount(from: preparedZPL(from: zpl))
+        labelsToPrintCount = ZPLParser.printableLabelCount(from: preparedZPL(from: zpl))
+        clampPrintRange()
+        clampPreviewLabelNumber()
     }
 
     private func readZPL(from fileURL: URL) -> String? {
@@ -416,24 +666,30 @@ final class PrintViewModel: ObservableObject {
 
         let adjustedZPL = preparedZPL(from: zpl)
         previewLabels = ZPLParser.splitLabels(from: adjustedZPL)
-        labelsToPrintCount = ZPLParser.labelCount(from: adjustedZPL)
+        labelsToPrintCount = ZPLParser.printableLabelCount(from: adjustedZPL)
+        clampPrintRange()
+        clampPreviewLabelNumber()
+
+        let expandedBlocks = ZPLParser.expandedLabelZPLBlocks(from: adjustedZPL)
+        let previewBlock = expandedBlocks.indices.contains(previewLabelNumber - 1)
+            ? expandedBlocks[previewLabelNumber - 1]
+            : previewLabels.first
 
         do {
-            let dpmm = ZPLLabelSize.dpmm(forPrinter: selectedPrinter)
+            let dpmm = resolvedDpmm
             let labelSize = selectedLabelSize.sizeInches
             previewLabelSizeInches = labelSize
-            updatePrintDefinition(for: previewLabels.first)
-            // First label only; ZPLPreviewService sleeps 200 ms before each Labelary POST (rate limit).
-            previewImages = try await ZPLPreviewService.renderLabels(
+            updatePrintDefinition(for: previewBlock)
+            let image = try await ZPLPreviewService.renderExpandedLabel(
+                atOneBasedIndex: previewLabelNumber,
                 zpl: adjustedZPL,
-                printerName: selectedPrinter,
-                labelSizeInches: labelSize,
-                startIndex: 0,
-                count: 1
+                dpmm: dpmm,
+                labelSizeInches: labelSize
             )
+            previewImages = [image]
 
             if labelsToPrintCount > 1 {
-                previewLimitMessage = "Showing the first label of \(labelsToPrintCount)."
+                previewLimitMessage = "One Labelary request per preview (rate limit)."
             } else {
                 previewLimitMessage = "This is the only label in the file."
             }
@@ -505,7 +761,29 @@ final class PrintViewModel: ObservableObject {
             return
         }
 
-        let adjustedData = Data(preparedZPL(from: zpl).utf8)
+        let adjustedZPL = preparedZPL(from: zpl)
+
+        let indices: [Int]
+        switch resolvedPrintIndices() {
+        case .success(let selected):
+            indices = selected
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+            statusMessage = ""
+            showErrorAlert = true
+            return
+        }
+
+        let printZPL = ZPLParser.buildPrintZPL(from: adjustedZPL, oneBasedIndices: indices)
+        guard !printZPL.isEmpty else {
+            errorMessage = "No label data matched your selection."
+            statusMessage = ""
+            showErrorAlert = true
+            return
+        }
+
+        let adjustedData = Data(printZPL.utf8)
+        lastPrintedLabelCount = indices.count
 
         isPrinting = true
         statusMessage = "Sending to printer…"

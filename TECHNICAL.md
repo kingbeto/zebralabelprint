@@ -8,10 +8,10 @@ Developer documentation for building, extending, and debugging the app.
 ZebraLabelPrint/
 ├── ZebraLabelPrintApp.swift      @main entry point
 ├── ContentView.swift             SwiftUI layout, setup checklist UI
-├── PrintViewModel.swift          State, persistence, print/preview orchestration
-├── CUPSPrinterService.swift      lpstat / lpr, queue status, CUPS restart
+├── PrintViewModel.swift          State, persistence, print/preview orchestration, print label selection
+├── CUPSPrinterService.swift      lpstat / lpr, queue status, pause/resume/cancel, CUPS restart
 ├── SetupRequirements.swift       Setup checklist rules and Zebra driver links
-├── ZPLPreviewService.swift       Labelary API, ZPL parsing, offset, label count
+├── ZPLPreviewService.swift       Labelary API, ZPL parsing, offset, label count, print resolution
 ├── LabelPreviewContainer.swift   Label roll preview UI
 ├── ZebraLabelPrint.entitlements  Hardened runtime (not App Store sandboxed)
 ├── Info.plist                    ATS exception for api.labelary.com (HTTP)
@@ -23,7 +23,13 @@ ZebraLabelPrint/
 - **Bundle ID:** `com.zebra.ZebraLabelPrint`
 - **Deployment target:** macOS 13
 - **Architecture:** arm64 only (Apple silicon). Builds on Apple silicon Macs produce an arm64 binary; there is no Intel (x86_64) slice.
-- **Window size:** 1640 × 1040
+- **Window size:** 1640 × 1040 default; sidebar controls column 460 pt wide; preview fills remaining width
+
+## UI layout (`ContentView.swift`)
+
+- **Controls column** — fixed 460 pt width; **Print labels** section always visible with fixed-height option row and hint area to avoid layout shift when switching scope or loading a file
+- **Preview column** — expands to fill remaining window width; label image scales to fit the preview area
+- **`PrintLabelScope`** — defined at the top of `PrintViewModel.swift` (`all`, `range`, `pages`); selection logic and `LabelSelectionError` live in the same file
 
 ## Printing
 
@@ -37,11 +43,45 @@ ZPL is written to a temporary file and passed to `lpr` as a path argument. Pipin
 
 Before printing, the app runs `cupsenable` and `cupsaccept` on the selected queue when needed.
 
+### Partial print selection
+
+`PrintViewModel.resolvedPrintIndices()` maps the UI scope to 1-based label indices:
+
+| Scope | Behavior |
+|-------|----------|
+| `all` | Every expanded label |
+| `range` | Inclusive `printRangeFrom` … `printRangeTo` (clamped to file) |
+| `pages` | Parsed list: `1`, `10`, `1, 5, 10-20` (macOS print-dialog style) |
+
+`ZPLParser.buildPrintZPL(from:oneBasedIndices:)` joins only the selected expanded blocks. The section is disabled when `labelsToPrintCount <= 1` or no file is selected; hints explain why (`printSelectionHint`).
+
+### Queue control
+
+`CUPSPrinterService` exposes:
+
+- `pausePrinterQueue` — `cupsdisable`
+- `resumePrinterQueue` — `cupsenable` + `cupsaccept`
+- `cancelAllJobs` — `cancel -a QUEUE`
+- `pendingJobCount` — `lpstat -o QUEUE`
+
+The sidebar **PrinterQueueStatusBanner** wires these to `PrintViewModel`.
+
 Printer queue names come from `lpstat -a` (CUPS names, not display names). Example: `Zebra_Technologies_ZTC_ZD410-203dpi_ZPL`.
 
 ### Horizontal offset
 
-When the offset slider is non-zero, the app shifts X coordinates on `^FO`, `^FT`, `^GB`, and `^GC` by `offsetMM × dpmm` dots before print and preview. Positive mm moves content to the right.
+When the offset slider is non-zero, the app shifts X coordinates on `^FO`, `^FT`, `^GB`, and `^GC` by `offsetMM × dpmm` dots before print and preview. Positive mm moves content to the right. DPMM comes from `ZebraPrintResolutionOption.resolvedDpmm` (Auto parses the printer queue name, e.g. `203dpi` → 8 dpmm).
+
+### Print resolution (`ZebraPrintResolutionOption`)
+
+| ID | DPMM | Use |
+|----|------|-----|
+| `auto` | from printer name | Default |
+| `8` | 8 | 203 dpi preview / offset |
+| `12` | 12 | 300 dpi preview / offset |
+| `24` | 24 | 600 dpi preview / offset |
+
+Does **not** rescale ZPL sent to the printer — only preview, offset math, and **Print definition** display.
 
 ### Setup checklist and privileged CUPS restart
 
@@ -49,23 +89,28 @@ When the offset slider is non-zero, the app shifts X coordinates on `^FO`, `^FT`
 
 The ↻ control restarts CUPS with `launchctl kickstart -k system/org.cups.cupsd` via AppleScript administrator privileges. The app is not App Store sandboxed so this prompt can succeed with a local admin password.
 
-## Label counting
+## Label counting and expansion
 
-`ZPLParser.labelCount(from:)` estimates how many labels will print:
+`ZPLParser.printableLabelCount(from:)` returns `expandedLabelZPLBlocks(from:).count` (minimum 1).
 
-1. Sum `^PQ` quantities per `^XA…^XZ` block (default 1 when omitted)
-2. If that is still low, count `^XA` starts (labels without a closing `^XZ` between them)
-3. Otherwise use the number of `^XA…^XZ` pairs
+`expandedLabelZPLBlocks(from:)`:
 
-Printing always sends the full adjusted ZPL file; the count is for UI messaging only.
+1. Split the file into `^XA…^XZ` blocks (or treat the whole file as one block)
+2. Read `^PQ` per block (default 1)
+3. Normalize each block to `^PQ1` and repeat it `^PQ` times — one array entry per **physical** label
+
+Legacy `labelCount(from:)` still exists for heuristics; UI and printing use the expanded list.
+
+Printing sends only the ZPL for indices chosen in **Print labels** via `buildPrintZPL(from:oneBasedIndices:)`.
 
 ## Preview
 
 Preview is rendered by the [Labelary](http://labelary.com) API (`api.labelary.com`). The app:
 
-1. Renders the **first label only** (Labelary rate limits; printing still sends all labels)
-2. Waits **200 ms** before each Labelary HTTP request; offset slider changes are debounced 300 ms
+1. Renders **one label at a time** — `renderExpandedLabel(atOneBasedIndex:…)` for the preview picker; Labelary rate limits apply
+2. Waits **200 ms** before each Labelary HTTP request; offset slider changes are debounced 300 ms; preview label number changes are debounced before refresh
 3. Uses the user-selected label size for aspect ratio in `LabelPreviewContainer`
+4. Uses `resolvedDpmm` from the print resolution picker for Labelary `dpmm` and offset
 
 `Info.plist` includes an App Transport Security exception for HTTP access to Labelary.
 
@@ -76,6 +121,7 @@ Preview is rendered by the [Labelary](http://labelary.com) API (`api.labelary.co
 | Saved printer queue name | Restored on launch; auto-select Zebra regex `(?i)zebra` if unset |
 | Horizontal offset (mm) | Applied on launch |
 | Label size ID | Default `2x1` |
+| Print resolution ID | Default `auto` (`selectedPrintResolutionId`) |
 
 ## Build
 
@@ -270,14 +316,28 @@ The icon is from [The Noun Project](https://thenounproject.com/) (zebra illustra
 |-------|--------|
 | macOS `lp -P` | Use `lpr -P` for queue, `-l` for raw/literal ZPL |
 | Large print jobs | Stage ZPL in a temp file; do not pipe multi-KB jobs to `lpr` stdin |
-| Labelary limit | Preview first label only; 200 ms delay before each API call |
-| Label count | `^PQ` sum, then `^XA` count, then `^XA…^XZ` pair count |
+| Labelary limit | One label per preview request; 200 ms delay before each API call |
+| Label expansion | `^PQ` copies expand to one block per physical label; print uses selected indices |
+| Print label UI | Always visible; disabled when `labelsToPrintCount <= 1` or no file |
 | Horizontal offset | Shift `^FO` / `^FT` / `^GB` / `^GC` X coordinates, not `^LS` |
+| Print resolution | Preview and offset only; printer native DPI unchanged |
+| CUPS queue UI | Pause / resume / cancel via `cupsdisable`, `cupsenable`, `cancel -a` |
 | CUPS locale | `lpstat -r` output is localized; parse text, not English-only strings |
 | SwiftUI `onChange` | Single-parameter form for macOS 13 compatibility |
+| SourceKit / IDE | Optional `buildServer.json` at repo root for Xcode project indexing |
 
 ## Discoverability (SEO)
 
-Most users find this project through **GitHub search** and **Google** indexing the README. Keep the README title and opening paragraph aligned with how people search (e.g. “print ZPL on Mac”, “Zebra printer macOS”, model names like ZD410).
+Most users find this project through **Google** and **GitHub search** when looking for:
 
-Maintainers should set the GitHub **About** description and **topics** — see [.github/REPOSITORY.md](.github/REPOSITORY.md). Release titles and notes on GitHub (e.g. “Zebra Label Print for Mac — ZPL printing”) also help search snippets.
+- how to print labels on Mac with Zebra printers
+- print ZPL on Mac / macOS
+- Zebra ZD410 (or ZD620, GK420d) Mac printing
+- Zebra CUPS driver macOS setup
+- Zebra thermal printer Mac without Windows
+
+Keep the [README](../README.md) title, first paragraph, and **How to print labels on Mac with a Zebra printer** section aligned with those phrases. Use question-style FAQ headings (`### How do I print labels with Zebra printers on Mac OS?`) — they match real searches and help rich snippets.
+
+Set the GitHub **About** description and **topics** from [.github/REPOSITORY.md](.github/REPOSITORY.md). Release titles should include “Mac”, “ZPL”, and “Zebra” (e.g. “Zebra Label Print 1.2.0 — print ZPL labels on Mac”).
+
+Model names (**ZD410**, **ZD620**, **GK420d**, **ZT410**) in the README support long-tail searches. Link to [Zebra’s official CUPS driver article](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) for driver-setup queries — this app does not replace that step.

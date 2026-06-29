@@ -6,7 +6,7 @@ struct ZebraLabelPrintApp: App {
         WindowGroup {
             ContentView()
         }
-        // big window on purpose — preview needs the space
+        // wider form column; preview uses remaining window space at full size
         .defaultSize(width: 1640, height: 1040)
     }
 }

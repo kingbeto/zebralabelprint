@@ -1,0 +1,11 @@
+{
+  "name": "xcode build server",
+  "version": "0.2",
+  "bspVersion": "2.0",
+  "languages": ["c", "cpp", "objective-c", "objective-cpp", "swift"],
+  "argv": ["/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild"],
+  "workspace": "/Users/alberto/Sites/zebra/ZebraLabelPrint.xcodeproj/project.xcworkspace",
+  "build_root": "/Users/alberto/Library/Developer/Xcode/DerivedData/ZebraLabelPrint-cpotpcpqvysoqndnnizddscgoatp",
+  "scheme": "ZebraLabelPrint",
+  "kind": "xcode"
+}
