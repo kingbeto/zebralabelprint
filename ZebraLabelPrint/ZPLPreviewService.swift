@@ -60,6 +60,18 @@ struct ZebraPrintResolutionOption: Identifiable, Hashable {
         }
         return PrinterDpmm.fromPrinterName(printerName)
     }
+
+    /// Industry-nominal dpi for a Zebra dot density. Printers are sold as "203/300/600 dpi"
+    /// even though the exact conversion (dpmm × 25.4) is 203/305/610 — we show the name buyers know.
+    static func nominalDpi(forDpmm dpmm: Int) -> Int {
+        switch dpmm {
+        case 6: return 152
+        case 8: return 203
+        case 12: return 300
+        case 24: return 600
+        default: return Int((Double(dpmm) * 25.4).rounded())
+        }
+    }
 }
 
 enum ZPLParser {
@@ -181,10 +193,8 @@ enum ZPLModifier {
 }
 
 enum ZPLPreviewService {
-    /// Labelary’s free API throttles rapid requests (HTTP 429). We only preview one
-    /// label per refresh and pause before each HTTP call so slider tweaks don’t trip the limit.
-    static let previewStripCount = 1
-
+    /// Labelary’s free API throttles rapid requests (HTTP 429). We only preview one label per
+    /// refresh and pause before each HTTP call so slider tweaks don’t trip the limit.
     /// 200 ms between Labelary calls — space out requests when the user moves offset/size sliders.
     private static let labelaryRequestDelayNanoseconds: UInt64 = 200_000_000
 
@@ -219,7 +229,7 @@ enum ZPLPreviewService {
         }
 
         let urlString = String(
-            format: "http://api.labelary.com/v1/printers/%ddpmm/labels/%.3fx%.3f/0/",
+            format: "https://api.labelary.com/v1/printers/%ddpmm/labels/%.3fx%.3f/0/",
             dpmm,
             labelSizeInches.width,
             labelSizeInches.height

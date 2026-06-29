@@ -119,9 +119,11 @@ struct LabelPreviewContainer: View {
         let spacing = labelSpacing * CGFloat(max(labelCount - 1, 0))
         let stripHeight = naturalHeight * CGFloat(labelCount) + spacing
 
-        let widthScale = (bounds.width * 0.85) / (naturalWidth + 24)
+        // Labelary renders at dpmm (~305 dpi), so the source bitmap has plenty of detail to
+        // upscale into the pane. Let a single label grow well past 1× instead of floating tiny.
+        let widthScale = (bounds.width * 0.92) / (naturalWidth + 24)
         let heightScale = bounds.height / stripHeight
-        let scale = min(widthScale, heightScale, 1.5)
+        let scale = min(widthScale, heightScale, 4.0)
 
         return CGSize(
             width: max(naturalWidth * scale, 40),

@@ -15,4 +15,11 @@ final class ZPLModifierTests: XCTestCase {
             zpl
         )
     }
+
+    func testApplyHorizontalOffsetClampsNegativeAtZero() {
+        // -5 mm × 8 dpmm = -40 dots; x=10 would go negative, so it clamps to 0 (never off-label).
+        let zpl = "^XA^FO10,50^FDTest^FS^XZ"
+        let shifted = ZPLModifier.applyHorizontalOffset(to: zpl, offsetMM: -5, dpmm: 8)
+        XCTAssertTrue(shifted.contains("^FO0,50"))
+    }
 }

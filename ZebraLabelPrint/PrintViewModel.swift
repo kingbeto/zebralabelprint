@@ -40,7 +40,6 @@ final class PrintViewModel: ObservableObject {
     @Published var previewLabelNumber = 1
     @Published var labelsToPrintCount = 0
     @Published var horizontalOffsetMM: Double = 0
-    @Published var printDefinitionInfo = ""
     @Published var selectedLabelSizeId: String = ZebraLabelSizeOption.defaultSize.id
     @Published var selectedResolutionId: String = ZebraPrintResolutionOption.defaultOption.id
     @Published var requirements: [SetupRequirement] = []
@@ -59,6 +58,10 @@ final class PrintViewModel: ObservableObject {
     private var previewLabelTask: Task<Void, Never>?
     private var setupRefreshTask: Task<Void, Never>?
     private var requirementsRefreshTask: Task<Void, Never>?
+
+    // Monotonic tokens so an out-of-order async result can't overwrite a newer one.
+    private var requirementsGeneration = 0
+    private var previewGeneration = 0
 
     // Printer wake-up after power-on can take several seconds; poll before giving up.
     private static let setupRefreshPollIntervalNanoseconds: UInt64 = 2_500_000_000
@@ -85,11 +88,11 @@ final class PrintViewModel: ObservableObject {
 
     var resolutionSummary: String {
         let dpmm = resolvedDpmm
-        let dpi = Int((Double(dpmm) * 25.4).rounded())
+        let dpi = ZebraPrintResolutionOption.nominalDpi(forDpmm: dpmm)
         if selectedResolutionId == ZebraPrintResolutionOption.defaultOption.id {
-            return "Using \(dpi) dpi (\(dpmm) dpmm), detected from printer."
+            return "Using \(dpi) dpi · \(dpmm) dpmm, detected from printer."
         }
-        return "Using \(dpi) dpi (\(dpmm) dpmm)."
+        return "Using \(dpi) dpi · \(dpmm) dpmm."
     }
 
     var canPrint: Bool {
@@ -224,12 +227,17 @@ final class PrintViewModel: ObservableObject {
     func refreshRequirements() {
         let printer = selectedPrinter
         requirementsRefreshTask?.cancel()
+        requirementsGeneration += 1
+        let generation = requirementsGeneration
+        isCheckingRequirements = true
         requirementsRefreshTask = Task {
-            isCheckingRequirements = true
             let snapshot = await Task.detached(priority: .utility) {
                 SetupRequirementsSnapshot.gather(selectedPrinter: printer)
             }.value
-            guard !Task.isCancelled else { return }
+            // Only the latest refresh applies its snapshot and clears the spinner — a superseded
+            // task returns without touching shared state, so a stale gather can't overwrite a
+            // newer one and a cancelled task can't leave the spinner stuck on.
+            guard generation == requirementsGeneration else { return }
             applyRequirementsCheck(snapshot)
             isCheckingRequirements = false
         }
@@ -311,31 +319,26 @@ final class PrintViewModel: ObservableObject {
     private func reconcileSelectedPrinter() {
         if printers.isEmpty {
             selectedPrinter = ""
-            updatePrintDefinition()
             return
         }
 
         if !selectedPrinter.isEmpty, printers.contains(selectedPrinter) {
-            updatePrintDefinition()
             return
         }
 
         if let savedPrinter = UserDefaults.standard.string(forKey: lastPrinterKey),
            printers.contains(savedPrinter) {
             selectedPrinter = savedPrinter
-            updatePrintDefinition()
             return
         }
 
         if let zebraPrinter = printers.first(where: Self.matchesZebra) {
             selectedPrinter = zebraPrinter
             persistPrinter(zebraPrinter)
-            updatePrintDefinition()
             return
         }
 
         selectedPrinter = ""
-        updatePrintDefinition()
     }
 
     private func setupStatusSummaryAfterTimeout() -> String {
@@ -508,30 +511,13 @@ final class PrintViewModel: ObservableObject {
         refreshRequirements()
     }
 
-    func updatePrintDefinition(for labelZPL: String? = nil) {
-        let dpmm = resolvedDpmm
-        let dpi = Int((Double(dpmm) * 25.4).rounded())
+    /// Accurate ZPL dot dimensions (^PW × ^LL) for the selected label at the resolved density.
+    /// Dots are computed from dpmm directly — the printer images at mm × dpmm, not nominal dpi.
+    private var labelDotsSummary: String {
         let size = selectedLabelSize
-
-        guard labelZPL != nil else {
-            printDefinitionInfo = """
-            DPMM: \(dpmm) · \(dpi) dpi
-            Label size: \(size.name)
-            """
-            return
-        }
-
-        let widthMM = size.widthInches * 25.4
-        let heightMM = size.heightInches * 25.4
-        let widthDots = Int((size.widthInches * Double(dpi)).rounded())
-        let heightDots = Int((size.heightInches * Double(dpi)).rounded())
-
-        printDefinitionInfo = """
-        DPMM: \(dpmm) · \(dpi) dpi
-        Label size: \(size.name)
-        Label: \(String(format: "%.1f", widthMM)) × \(String(format: "%.1f", heightMM)) mm
-        Dots: \(widthDots) × \(heightDots) (^PW × ^LL)
-        """
+        let widthDots = Int((size.widthInches * 25.4 * Double(resolvedDpmm)).rounded())
+        let heightDots = Int((size.heightInches * 25.4 * Double(resolvedDpmm)).rounded())
+        return "\(widthDots) × \(heightDots) dots"
     }
 
     func persistPrinter(_ printer: String) {
@@ -590,10 +576,17 @@ final class PrintViewModel: ObservableObject {
 
         guard let data = try? Data(contentsOf: fileURL),
               !data.isEmpty,
-              let zpl = String(data: data, encoding: .utf8) else {
+              let zpl = Self.decodeZPL(data) else {
             return nil
         }
         return zpl
+    }
+
+    /// ZPL is usually ASCII but legacy exports are often Latin-1 (CP1252-ish), not UTF-8.
+    /// Try UTF-8 first, then fall back to Latin-1, which decodes any byte sequence — so a
+    /// non-UTF-8 file renders instead of failing silently.
+    private static func decodeZPL(_ data: Data) -> String? {
+        String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
     }
 
     func loadPreview() async {
@@ -606,10 +599,15 @@ final class PrintViewModel: ObservableObject {
             return
         }
 
+        previewGeneration += 1
+        let generation = previewGeneration
+
         isLoadingPreview = true
         previewError = ""
         previewLimitMessage = ""
-        defer { isLoadingPreview = false }
+        // Only the latest preview request clears the spinner, so an out-of-order older
+        // request can't hide it while a newer one is still rendering.
+        defer { if generation == previewGeneration { isLoadingPreview = false } }
 
         let accessing = fileURL.startAccessingSecurityScopedResource()
         defer {
@@ -634,7 +632,7 @@ final class PrintViewModel: ObservableObject {
             return
         }
 
-        guard let zpl = String(data: zplData, encoding: .utf8) else {
+        guard let zpl = Self.decodeZPL(zplData) else {
             previewImages = []
             previewError = "The ZPL file could not be read as text."
             labelsToPrintCount = 0
@@ -646,22 +644,18 @@ final class PrintViewModel: ObservableObject {
         clampPrintRange()
         clampPreviewLabelNumber()
 
-        let expandedBlocks = ZPLParser.expandedLabelZPLBlocks(from: adjustedZPL)
-        let previewBlock = expandedBlocks.indices.contains(previewLabelNumber - 1)
-            ? expandedBlocks[previewLabelNumber - 1]
-            : nil
-
         do {
             let dpmm = resolvedDpmm
             let labelSize = selectedLabelSize.sizeInches
             previewLabelSizeInches = labelSize
-            updatePrintDefinition(for: previewBlock)
             let image = try await ZPLPreviewService.renderExpandedLabel(
                 atOneBasedIndex: previewLabelNumber,
                 zpl: adjustedZPL,
                 dpmm: dpmm,
                 labelSizeInches: labelSize
             )
+            // A newer request started while this one was on the network — drop this result.
+            guard generation == previewGeneration else { return }
             previewImages = [image]
 
             if labelsToPrintCount > 1 {
@@ -670,16 +664,13 @@ final class PrintViewModel: ObservableObject {
                 previewLimitMessage = "This is the only label in the file."
             }
 
-            let dimensions = String(
-                format: "%@ @ %d dpmm",
-                selectedLabelSize.name,
-                dpmm
-            )
-            previewLabelInfo = dimensions
+            let dpi = ZebraPrintResolutionOption.nominalDpi(forDpmm: dpmm)
+            previewLabelInfo = "\(selectedLabelSize.name) · \(dpi) dpi · \(dpmm) dpmm · \(labelDotsSummary)"
             if horizontalOffsetMM != 0 {
                 previewLabelInfo += String(format: " · offset %+.1f mm", horizontalOffsetMM)
             }
         } catch {
+            guard generation == previewGeneration else { return }
             previewImages = []
             previewLabelInfo = ""
             previewLimitMessage = ""
@@ -687,7 +678,7 @@ final class PrintViewModel: ObservableObject {
         }
     }
 
-    func printFile() {
+    func printFile() async {
         guard canPrint else {
             errorMessage = printBlockedReason ?? "Complete the setup checklist before printing."
             showErrorAlert = true
@@ -700,12 +691,50 @@ final class PrintViewModel: ObservableObject {
             return
         }
 
-        guard !selectedPrinter.isEmpty else {
+        let printer = selectedPrinter
+        guard !printer.isEmpty else {
             errorMessage = "Select a printer first."
             showErrorAlert = true
             return
         }
 
+        // Read and prepare on the main actor (fast, in-memory), then hand the finished bytes to a
+        // detached task — only the lpr subprocess (up to 30 s) runs off the main thread, so the UI
+        // stays responsive while printing.
+        guard let adjustedData = preparePrintData(from: fileURL, printer: printer) else {
+            return
+        }
+
+        isPrinting = true
+        statusMessage = "Sending to printer…"
+        defer { isPrinting = false }
+
+        persistPrinter(printer)
+
+        let result = await Task.detached(priority: .userInitiated) {
+            CUPSPrinterService.printRaw(zplData: adjustedData, to: printer)
+        }.value
+
+        switch result {
+        case .success(let submission):
+            refreshRequirements()
+            switch submission {
+            case .sent:
+                statusMessage = "Print job sent successfully."
+            case .queuedWhilePaused:
+                statusMessage = "Job queued, but the printer was paused. It has been resumed — check the printer if nothing prints."
+            }
+            showSuccessAlert = true
+        case .failure(let error):
+            errorMessage = error.localizedDescription
+            statusMessage = ""
+            showErrorAlert = true
+        }
+    }
+
+    /// Reads the file, applies the offset, and resolves the selected labels into print-ready bytes.
+    /// Returns nil after surfacing an error alert when anything is unreadable or empty.
+    private func preparePrintData(from fileURL: URL, printer: String) -> Data? {
         let accessing = fileURL.startAccessingSecurityScopedResource()
         defer {
             if accessing {
@@ -720,21 +749,21 @@ final class PrintViewModel: ObservableObject {
             errorMessage = "Could not read \"\(fileURL.lastPathComponent)\": \(error.localizedDescription)"
             statusMessage = ""
             showErrorAlert = true
-            return
+            return nil
         }
 
         guard !zplData.isEmpty else {
             errorMessage = "The selected file is empty."
             statusMessage = ""
             showErrorAlert = true
-            return
+            return nil
         }
 
-        guard let zpl = String(data: zplData, encoding: .utf8) else {
+        guard let zpl = Self.decodeZPL(zplData) else {
             errorMessage = "The ZPL file could not be read as text."
             statusMessage = ""
             showErrorAlert = true
-            return
+            return nil
         }
 
         let adjustedZPL = preparedZPL(from: zpl)
@@ -747,7 +776,7 @@ final class PrintViewModel: ObservableObject {
             errorMessage = error.localizedDescription
             statusMessage = ""
             showErrorAlert = true
-            return
+            return nil
         }
 
         let printZPL = ZPLParser.buildPrintZPL(from: adjustedZPL, oneBasedIndices: indices)
@@ -755,33 +784,11 @@ final class PrintViewModel: ObservableObject {
             errorMessage = "No label data matched your selection."
             statusMessage = ""
             showErrorAlert = true
-            return
+            return nil
         }
 
-        let adjustedData = Data(printZPL.utf8)
         lastPrintedLabelCount = indices.count
-
-        isPrinting = true
-        statusMessage = "Sending to printer…"
-        defer { isPrinting = false }
-
-        persistPrinter(selectedPrinter)
-
-        switch CUPSPrinterService.printRaw(zplData: adjustedData, to: selectedPrinter) {
-        case .success(let result):
-            refreshRequirements()
-            switch result {
-            case .sent:
-                statusMessage = "Print job sent successfully."
-            case .queuedWhilePaused:
-                statusMessage = "Job queued, but the printer was paused. It has been resumed — check the printer if nothing prints."
-            }
-            showSuccessAlert = true
-        case .failure(let error):
-            errorMessage = error.localizedDescription
-            statusMessage = ""
-            showErrorAlert = true
-        }
+        return Data(printZPL.utf8)
     }
 }
 

@@ -15,7 +15,7 @@ ZebraLabelPrint/
 ├── ZPLPreviewService.swift       Labelary API, ZPL parsing, offset, label count, print resolution
 ├── LabelPreviewContainer.swift   Label roll preview UI
 ├── ZebraLabelPrint.entitlements  Hardened runtime (not App Store sandboxed)
-├── Info.plist                    ATS exception for api.labelary.com (HTTP)
+├── Info.plist                    App metadata + admin-authorization usage string
 └── Assets.xcassets/
 
 ZebraLabelPrintTests/
@@ -112,11 +112,11 @@ Printing sends only the ZPL for indices chosen in **Print labels** via `buildPri
 Preview is rendered by the [Labelary](http://labelary.com) API (`api.labelary.com`). The app:
 
 1. Renders **one label at a time** — `renderExpandedLabel(atOneBasedIndex:…)` for the preview picker; Labelary rate limits apply
-2. Waits **200 ms** before each Labelary HTTP request; offset slider changes are debounced 300 ms; preview label number changes are debounced before refresh
+2. Waits **200 ms** before each Labelary HTTPS request; offset slider changes are debounced 300 ms; preview label number changes are debounced before refresh
 3. Uses the user-selected label size for aspect ratio in `LabelPreviewContainer`
 4. Uses `resolvedDpmm` from the print resolution picker for Labelary `dpmm` and offset
 
-`Info.plist` includes an App Transport Security exception for HTTP access to Labelary. The preview panel discloses that label data is sent to labelary.com.
+Requests go to Labelary over **HTTPS**, so no App Transport Security exception is needed. The preview panel discloses that label data is sent to labelary.com.
 
 ## Testing
 

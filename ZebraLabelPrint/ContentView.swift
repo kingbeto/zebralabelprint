@@ -17,6 +17,7 @@ private enum AppLayout {
 struct ContentView: View {
     @StateObject private var viewModel = PrintViewModel()
     @State private var isChecklistManuallyExpanded = false
+    @State private var isAdvancedExpanded = false
 
     private var isChecklistExpanded: Bool {
         !viewModel.isSetupChecklistComplete || isChecklistManuallyExpanded
@@ -43,18 +44,15 @@ struct ContentView: View {
         }
         .onChange(of: viewModel.selectedPrinter) { printer in
             viewModel.persistPrinter(printer)
-            viewModel.updatePrintDefinition()
             viewModel.refreshRequirements()
             Task { await viewModel.loadPreview() }
         }
         .onChange(of: viewModel.selectedLabelSizeId) { _ in
             viewModel.persistLabelSize()
-            viewModel.updatePrintDefinition()
             Task { await viewModel.loadPreview() }
         }
         .onChange(of: viewModel.selectedResolutionId) { _ in
             viewModel.persistResolution()
-            viewModel.updatePrintDefinition()
             Task { await viewModel.loadPreview() }
         }
         .onChange(of: viewModel.horizontalOffsetMM) { _ in
@@ -84,172 +82,208 @@ struct ContentView: View {
     }
 
     private var controlsPanel: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     Text(AppTitle.name)
                         .font(.title2)
                         .fontWeight(.semibold)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("ZPL file")
-                            .font(.headline)
+                    sourceSection
+                    outputSection
+                    advancedSection
+                }
+                .padding(.bottom, 8)
+            }
 
-                        HStack {
-                            Text(viewModel.selectedFileURL?.lastPathComponent ?? "No file selected")
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .foregroundStyle(viewModel.selectedFileURL == nil ? .secondary : .primary)
+            actionFooter
+        }
+    }
 
-                            Spacer()
+    // MARK: - Settings sections
 
-                            Button("Choose…") {
-                                viewModel.selectFile()
-                            }
-                        }
+    private var sourceSection: some View {
+        GroupBox(label: sectionLabel("Source", systemImage: "doc.text")) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldLabel("ZPL file")
 
-                        if !viewModel.labelsToPrintSummary.isEmpty {
-                            Text(viewModel.labelsToPrintSummary)
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
+                    HStack {
+                        Text(viewModel.selectedFileURL?.lastPathComponent ?? "No file selected")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .foregroundStyle(viewModel.selectedFileURL == nil ? .secondary : .primary)
+
+                        Spacer()
+
+                        Button("Choose…") {
+                            viewModel.selectFile()
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Print labels")
-                            .font(.headline)
-
-                        Picker("Print labels", selection: $viewModel.printScope) {
-                            ForEach(PrintLabelScope.allCases) { scope in
-                                Text(scope.title).tag(scope)
-                            }
-                        }
-                        .pickerStyle(.radioGroup)
-                        .labelsHidden()
-
-                        PrintScopeOptionsRow(
-                            printScope: viewModel.printScope,
-                            printRangeFrom: $viewModel.printRangeFrom,
-                            printRangeTo: $viewModel.printRangeTo,
-                            printPagesText: $viewModel.printPagesText
-                        )
-
-                        Text(viewModel.printSelectionHint.isEmpty ? " " : viewModel.printSelectionHint)
-                            .font(.caption)
+                    if !viewModel.labelsToPrintSummary.isEmpty {
+                        Text(viewModel.labelsToPrintSummary)
+                            .font(.callout)
                             .foregroundStyle(.secondary)
-                            .frame(
-                                maxWidth: .infinity,
-                                minHeight: AppLayout.printScopeHintHeight,
-                                alignment: .topLeading
-                            )
-                            .opacity(viewModel.printSelectionHint.isEmpty ? 0 : 1)
                     }
-                    .disabled(!viewModel.isPrintLabelSelectionEnabled)
-                    .onChange(of: viewModel.printRangeFrom) { _ in
-                        viewModel.clampPrintRange()
-                    }
-                    .onChange(of: viewModel.printRangeTo) { _ in
-                        viewModel.clampPrintRange()
-                    }
+                }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Printer")
-                    .font(.headline)
+                Divider()
 
-                if viewModel.printers.isEmpty {
-                    Text("No printers available")
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldLabel("Print labels")
+
+                    Picker("Print labels", selection: $viewModel.printScope) {
+                        ForEach(PrintLabelScope.allCases) { scope in
+                            Text(scope.title).tag(scope)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .labelsHidden()
+
+                    PrintScopeOptionsRow(
+                        printScope: viewModel.printScope,
+                        printRangeFrom: $viewModel.printRangeFrom,
+                        printRangeTo: $viewModel.printRangeTo,
+                        printPagesText: $viewModel.printPagesText
+                    )
+
+                    Text(viewModel.printSelectionHint.isEmpty ? " " : viewModel.printSelectionHint)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                } else {
-                    Picker("Printer", selection: $viewModel.selectedPrinter) {
-                        ForEach(viewModel.printersForPicker, id: \.self) { printer in
-                            Text(viewModel.printerDisplayName(printer)).tag(printer)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: AppLayout.printScopeHintHeight,
+                            alignment: .topLeading
+                        )
+                        .opacity(viewModel.printSelectionHint.isEmpty ? 0 : 1)
+                }
+                .disabled(!viewModel.isPrintLabelSelectionEnabled)
+                .onChange(of: viewModel.printRangeFrom) { _ in
+                    viewModel.clampPrintRange()
+                }
+                .onChange(of: viewModel.printRangeTo) { _ in
+                    viewModel.clampPrintRange()
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var outputSection: some View {
+        GroupBox(label: sectionLabel("Output", systemImage: "printer")) {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldLabel("Printer")
+
+                    if viewModel.printers.isEmpty {
+                        Text("No printers available")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker("Printer", selection: $viewModel.selectedPrinter) {
+                            ForEach(viewModel.printersForPicker, id: \.self) { printer in
+                                Text(viewModel.printerDisplayName(printer)).tag(printer)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldLabel("Label size")
+
+                    Picker("Label size", selection: $viewModel.selectedLabelSizeId) {
+                        ForEach(ZebraLabelSizeOption.standardSizes) { size in
+                            Text(size.name).tag(size.id)
                         }
                     }
                     .labelsHidden()
                     .pickerStyle(.menu)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 4)
+        }
+    }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Label size")
-                    .font(.headline)
+    private var advancedSection: some View {
+        DisclosureGroup(isExpanded: $isAdvancedExpanded) {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldLabel("Print resolution")
 
-                Picker("Label size", selection: $viewModel.selectedLabelSizeId) {
-                    ForEach(ZebraLabelSizeOption.standardSizes) { size in
-                        Text(size.name).tag(size.id)
+                    Picker("Print resolution", selection: $viewModel.selectedResolutionId) {
+                        ForEach(ZebraPrintResolutionOption.allOptions) { option in
+                            Text(option.name).tag(option.id)
+                        }
                     }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-            }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Print resolution")
-                    .font(.headline)
-
-                Picker("Print resolution", selection: $viewModel.selectedResolutionId) {
-                    ForEach(ZebraPrintResolutionOption.allOptions) { option in
-                        Text(option.name).tag(option.id)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.menu)
-
-                Text(viewModel.resolutionSummary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text("Preview and horizontal offset use this setting. The printer uses its own native resolution for output.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Print definition")
-                    .font(.headline)
-
-                Text(viewModel.printDefinitionInfo.isEmpty
-                    ? "Select a printer to see DPMM."
-                    : viewModel.printDefinitionInfo)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Horizontal offset")
-                    .font(.headline)
-
-                HStack(spacing: 12) {
-                    Slider(
-                        value: $viewModel.horizontalOffsetMM,
-                        in: -10...10,
-                        step: 0.5
-                    )
-
-                    Text(String(format: "%+.1f mm", viewModel.horizontalOffsetMM))
-                        .monospacedDigit()
-                        .frame(width: 64, alignment: .trailing)
-                }
-
-                HStack {
-                    Text("Positive moves content to the right.")
+                    Text(viewModel.resolutionSummary)
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    Spacer()
+                    Text("Preview and horizontal offset use this setting. The printer uses its own native resolution for output.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
-                    Button("Reset") {
-                        viewModel.resetHorizontalOffset()
+                Divider()
+
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldLabel("Horizontal offset")
+
+                    HStack(spacing: 12) {
+                        Slider(
+                            value: $viewModel.horizontalOffsetMM,
+                            in: -10...10,
+                            step: 0.5
+                        )
+
+                        Text(String(format: "%+.1f mm", viewModel.horizontalOffsetMM))
+                            .monospacedDigit()
+                            .frame(width: 64, alignment: .trailing)
                     }
-                    .disabled(viewModel.horizontalOffsetMM == 0)
+
+                    HStack {
+                        Text("Positive moves content to the right.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        Button("Reset") {
+                            viewModel.resetHorizontalOffset()
+                        }
+                        .disabled(viewModel.horizontalOffsetMM == 0)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 10)
+        } label: {
+            sectionLabel("Advanced", systemImage: "slider.horizontal.3")
+        }
+        .padding(.horizontal, 2)
+    }
+
+    // MARK: - Footer (status + primary actions)
+
+    private var actionFooter: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+
+            statusSection
 
             if !viewModel.statusMessage.isEmpty {
                 Text(viewModel.statusMessage)
-                    .font(.callout)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
@@ -258,52 +292,63 @@ struct ContentView: View {
                     NSApplication.shared.terminate(nil)
                 }
                 .keyboardShortcut(.cancelAction)
-                .font(.title3)
-                .frame(minWidth: 120, minHeight: 44)
+                .controlSize(.large)
 
                 Spacer()
 
                 Button("Print") {
-                    viewModel.printFile()
+                    Task { await viewModel.printFile() }
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
                 .disabled(!viewModel.canPrint)
                 .help(viewModel.printBlockedReason ?? "Send the label file to the selected printer.")
-                .font(.title3)
-                .frame(minWidth: 120, minHeight: 44)
-            }
-            .padding(.top, 28)
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                if !viewModel.selectedPrinter.isEmpty {
-                    PrinterQueueStatusBanner(
-                        status: viewModel.printerQueueStatus,
-                        pendingJobCount: viewModel.pendingJobCount,
-                        isRefreshing: viewModel.isCheckingRequirements,
-                        onRefresh: { viewModel.refreshSetupStatus() },
-                        onResume: { viewModel.resumeSelectedPrinter() },
-                        onPause: { viewModel.pauseSelectedPrinter() },
-                        onCancelJobs: { viewModel.cancelSelectedPrinterJobs() }
-                    )
-                }
-
-                if viewModel.isPollingSetupStatus {
-                    Text("Checking again — the printer may take a moment to come online. Please stand by.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                RequirementsPanel(
-                    viewModel: viewModel,
-                    isExpanded: isChecklistExpanded,
-                    onExpand: { isChecklistManuallyExpanded = true },
-                    onCollapse: { isChecklistManuallyExpanded = false }
-                )
             }
         }
+        .padding(.top, 12)
+    }
+
+    private var statusSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !viewModel.selectedPrinter.isEmpty {
+                PrinterQueueStatusBanner(
+                    status: viewModel.printerQueueStatus,
+                    pendingJobCount: viewModel.pendingJobCount,
+                    isRefreshing: viewModel.isCheckingRequirements,
+                    onRefresh: { viewModel.refreshSetupStatus() },
+                    onResume: { viewModel.resumeSelectedPrinter() },
+                    onPause: { viewModel.pauseSelectedPrinter() },
+                    onCancelJobs: { viewModel.cancelSelectedPrinterJobs() }
+                )
+            }
+
+            if viewModel.isPollingSetupStatus {
+                Text("Checking again — the printer may take a moment to come online. Please stand by.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            RequirementsPanel(
+                viewModel: viewModel,
+                isExpanded: isChecklistExpanded,
+                onExpand: { isChecklistManuallyExpanded = true },
+                onCollapse: { isChecklistManuallyExpanded = false }
+            )
+        }
+    }
+
+    private func sectionLabel(_ title: String, systemImage: String) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.headline)
+    }
+
+    private func fieldLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline)
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary)
     }
 
     private var previewPanel: some View {
@@ -324,9 +369,16 @@ struct ContentView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Text("Privacy: preview sends your label data to labelary.com over the network.")
+            Label("Preview sends your label data to labelary.com over the network.", systemImage: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.orange.opacity(0.30), lineWidth: 1)
+                }
 
             if viewModel.labelsToPrintCount > 1 {
                 HStack(spacing: 12) {
@@ -602,7 +654,7 @@ private struct RequirementsPanel: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(
                     viewModel.isSetupChecklistComplete
-                        ? Color.green.opacity(0.35)
+                        ? Color.primary.opacity(0.10)
                         : Color.orange.opacity(0.35),
                     lineWidth: 1
                 )
@@ -723,27 +775,24 @@ private struct PrinterQueueStatusBanner: View {
 
     private var backgroundColor: Color {
         switch status {
-        case .ready:
-            return Color.green.opacity(0.10)
+        case .ready, .unknown:
+            // Healthy/idle is the quietest signal — reserve tint for problems.
+            return Color(nsColor: .controlBackgroundColor)
         case .paused:
             return Color.orange.opacity(0.12)
         case .offline:
             return Color.red.opacity(0.10)
-        case .unknown:
-            return Color(nsColor: .controlBackgroundColor)
         }
     }
 
     private var borderColor: Color {
         switch status {
-        case .ready:
-            return Color.green.opacity(0.35)
+        case .ready, .unknown:
+            return Color.primary.opacity(0.10)
         case .paused:
             return Color.orange.opacity(0.45)
         case .offline:
             return Color.red.opacity(0.40)
-        case .unknown:
-            return Color.primary.opacity(0.10)
         }
     }
 }
