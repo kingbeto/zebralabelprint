@@ -2,63 +2,20 @@
 
 **Zebra Label Print** is a free, open-source **macOS app to print label files on Zebra thermal printers** — ZD410, ZD420, ZD620, GK420d, ZT series, and any other Zebra model that appears in **System Settings → Printers & Scanners**. Open a **ZPL** (Zebra Programming Language) file, preview the label, and send it to your printer through **CUPS**. Built for **Apple silicon Macs** (macOS 13+).
 
-If you searched for **how to print labels with Zebra printers on Mac OS**, **print ZPL on Mac**, or **Zebra printer macOS setup**, you are in the right place: install [Zebra’s official CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false), add the printer queue in macOS, then use this app for day-to-day **shipping labels**, **barcode labels**, and **warehouse labels** — no Windows PC or virtual machine required.
+If you searched for **how to print labels with Zebra printers on Mac OS**, **print ZPL on Mac**, or **Zebra printer macOS setup**, you are in the right place: install [Zebra’s official CUPS driver](https://support.zebra.com/article/Configuring-a-Zebra-Printer-with-the-CUPS-driver), add the printer queue in macOS, then use this app for day-to-day **shipping labels**, **barcode labels**, and **warehouse labels** — no Windows PC or virtual machine required.
 
-**[Download Zebra Label Print for Mac (DMG)](https://github.com/kingbeto/zebralabelprint/releases/latest)** · [Releases](https://github.com/kingbeto/zebralabelprint/releases) · [Source & build notes](TECHNICAL.md)
+**[Download Zebra Label Print for Mac (DMG)](https://github.com/kingbeto/zebralabelprint/releases/download/v1.3.0/ZebraLabelPrint-arm64.dmg)** · [Releases](https://github.com/kingbeto/zebralabelprint/releases) · [Source & build notes](TECHNICAL.md)
 
 ![How to print ZPL labels on Mac with a Zebra thermal printer — preview, printer selection, print label range, and setup checklist in Zebra Label Print on macOS](docs/screenshot.png)
 
-## How to print labels on Mac with a Zebra printer
+## Installation
 
-Follow these steps to print **ZPL label files** from a **Mac** to a **Zebra thermal printer**:
+1. Install the [Zebra CUPS driver](https://support.zebra.com/article/Configuring-a-Zebra-Printer-with-the-CUPS-driver) and add your printer in **System Settings → Printers & Scanners**.
+2. Download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.3.0/ZebraLabelPrint-arm64.dmg)** (v1.3.0), open it, and drag the app to **Applications**.
+3. On first launch, right-click the app → **Open** (macOS may block unsigned apps), or allow it under **System Settings → Privacy & Security**.
+4. Open a `.zpl` or `.txt` file (must contain ZPL: `^XA` … `^XZ`), select your printer, and click **Print**.
 
-### 1. Install the Zebra CUPS driver on macOS
-
-Zebra requires their **macOS CUPS driver** before any app (including this one) can print. This is Zebra’s requirement, not something Zebra Label Print installs.
-
-→ [Zebra: Install CUPS Driver for Zebra Printer in Mac OS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false)
-
-### 2. Add your Zebra printer in System Settings
-
-Open **System Settings → Printers & Scanners** and add your Zebra printer (USB, Ethernet, or Wi‑Fi). macOS registers it as a **CUPS print queue**.
-
-Verify from Terminal:
-
-```bash
-lpstat -a | grep -i zebra
-```
-
-Example when setup is correct:
-
-```
-Zebra_Technologies_ZTC_ZD410-203dpi_ZPL accepting requests since ...
-```
-
-Confirm CUPS is running:
-
-```bash
-lpstat -r
-```
-
-You should see `scheduler is running`.
-
-### 3. Download and install Zebra Label Print
-
-Download **[ZebraLabelPrint-arm64.dmg](https://github.com/kingbeto/zebralabelprint/releases/download/v1.2.0/ZebraLabelPrint-arm64.dmg)** (v1.2.0), open it, and drag **ZebraLabelPrint.app** to **Applications**.
-
-On first launch, macOS may block the app because it is not signed by Apple. Right-click the app → **Open** → **Open** again, or allow it under **System Settings → Privacy & Security**.
-
-### 4. Open your label file and print
-
-1. Launch **Zebra Label Print** (the file picker opens automatically).
-2. Choose a `.zpl` or `.txt` file — the content must be **ZPL** (`^XA` … `^XZ`); the extension is only for convenience.
-3. Select your **Zebra printer** from the dropdown (the app remembers it and auto-picks a queue whose name contains “zebra”).
-4. Review the **live preview** on the right and the **setup checklist** at the bottom of the sidebar.
-5. Click **Print**.
-
-The app sends **raw ZPL** to CUPS (`lpr`), the same way ERP systems, shipping platforms, and Zebra Design Studio export labels.
-
-**TL;DR** — [Zebra CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) → add printer in System Settings → download DMG → open ZPL file → **Print**.
+Verify the printer queue with `lpstat -a | grep -i zebra` — if it lists your printer, you are ready.
 
 ## Supported Zebra printers on Mac
 
@@ -89,7 +46,7 @@ If `lpstat -a | grep -i zebra` lists your printer, Zebra Label Print can send jo
 
 - **macOS 13** (Ventura) or later — **Mac OS** printing through CUPS
 - **Apple silicon Mac** (M1 or later). Intel Macs are not supported in the pre-built DMG; see [TECHNICAL.md](TECHNICAL.md) to compile yourself.
-- [Zebra CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) installed
+- [Zebra CUPS driver](https://support.zebra.com/article/Configuring-a-Zebra-Printer-with-the-CUPS-driver) installed
 - Zebra printer added in **System Settings → Printers & Scanners**
 
 ## Using the app
@@ -123,7 +80,7 @@ Enabled only when the file has **more than one** printable label. Otherwise the 
 
 ### How do I print labels with Zebra printers on Mac OS?
 
-1. Install [Zebra’s CUPS driver for macOS](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false).
+1. Install [Zebra’s CUPS driver for macOS](https://support.zebra.com/article/Configuring-a-Zebra-Printer-with-the-CUPS-driver).
 2. Add the printer in **System Settings → Printers & Scanners**.
 3. Download **Zebra Label Print**, open your `.zpl` or `.txt` ZPL file, and click **Print**.
 
@@ -168,7 +125,7 @@ The distributed DMG is **arm64** only. See [TECHNICAL.md](TECHNICAL.md) to build
 
 ## Troubleshooting
 
-- **No printers listed** — Install [Zebra’s CUPS driver](https://support.zebra.com/article/Install-CUPS-Driver-for-Zebra-Printer-in-Mac-OS?redirect=false) and add the printer in System Settings.
+- **No printers listed** — Install [Zebra’s CUPS driver](https://support.zebra.com/article/Configuring-a-Zebra-Printer-with-the-CUPS-driver) and add the printer in System Settings.
 - **Setup checklist stays red** — Expand for details; restart CUPS with ↻ if needed; wait on **Refresh** after powering the printer on.
 - **Print succeeds but nothing prints** — Queue may be paused; **Resume** in the banner or System Settings.
 - **Print labels disabled** — No file selected, still loading, or only one label in the file.
