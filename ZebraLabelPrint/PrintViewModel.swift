@@ -62,6 +62,7 @@ final class PrintViewModel: ObservableObject {
     // Monotonic tokens so an out-of-order async result can't overwrite a newer one.
     private var requirementsGeneration = 0
     private var previewGeneration = 0
+    private var sawPrinterSelection = false
 
     // Printer wake-up after power-on can take several seconds; poll before giving up.
     private static let setupRefreshPollIntervalNanoseconds: UInt64 = 2_500_000_000
@@ -246,6 +247,7 @@ final class PrintViewModel: ObservableObject {
 
     /// Poll setup status for up to ~15 s so a printer that was just turned on can come online.
     func refreshSetupStatus() {
+        UsageLog.ui("refresh_setup")
         setupRefreshTask?.cancel()
         setupRefreshTask = Task {
             isCheckingRequirements = true
@@ -472,15 +474,22 @@ final class PrintViewModel: ObservableObject {
     func resetHorizontalOffset() {
         horizontalOffsetMM = 0
         persistHorizontalOffset()
+        UsageLog.ui("offset", "0")
         Task { await loadPreview() }
+    }
+
+    func noteOffsetSettled() {
+        UsageLog.ui("offset", String(format: "%.1f", horizontalOffsetMM))
     }
 
     func persistLabelSize() {
         UserDefaults.standard.set(selectedLabelSizeId, forKey: labelSizeKey)
+        UsageLog.ui("size", selectedLabelSizeId)
     }
 
     func persistResolution() {
         UserDefaults.standard.set(selectedResolutionId, forKey: resolutionKey)
+        UsageLog.ui("dpi", selectedResolutionId)
     }
 
     func persistHorizontalOffset() {
@@ -503,6 +512,7 @@ final class PrintViewModel: ObservableObject {
         previewLabelTask = Task {
             try? await Task.sleep(nanoseconds: 300_000_000)
             guard !Task.isCancelled else { return }
+            UsageLog.ui("preview_label", "\(previewLabelNumber)")
             await loadPreview()
         }
     }
@@ -545,6 +555,14 @@ final class PrintViewModel: ObservableObject {
     func persistPrinter(_ printer: String) {
         guard !printer.isEmpty else { return }
         UserDefaults.standard.set(printer, forKey: lastPrinterKey)
+    }
+
+    /// Skips the first assignment, which is the saved or auto-picked queue, not a picker click.
+    func notePrinterPicker(_ printer: String) {
+        guard !printer.isEmpty else { return }
+        defer { sawPrinterSelection = true }
+        guard sawPrinterSelection else { return }
+        UsageLog.ui("printer", Self.matchesZebra(printer) ? "zebra" : "other")
     }
 
     private static func matchesZebra(_ printerName: String) -> Bool {

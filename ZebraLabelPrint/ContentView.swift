@@ -43,9 +43,13 @@ struct ContentView: View {
             viewModel.refreshRequirements()
         }
         .onChange(of: viewModel.selectedPrinter) { printer in
+            viewModel.notePrinterPicker(printer)
             viewModel.persistPrinter(printer)
             viewModel.refreshRequirements()
             Task { await viewModel.loadPreview() }
+        }
+        .onChange(of: viewModel.printScope) { scope in
+            UsageLog.ui("scope", scope.rawValue)
         }
         .onChange(of: viewModel.selectedLabelSizeId) { _ in
             viewModel.persistLabelSize()
@@ -117,6 +121,7 @@ struct ContentView: View {
                         Spacer()
 
                         Button("Choose…") {
+                            UsageLog.ui("file_picker")
                             viewModel.selectFile()
                         }
                     }
@@ -243,7 +248,12 @@ struct ContentView: View {
                         Slider(
                             value: $viewModel.horizontalOffsetMM,
                             in: -10...10,
-                            step: 0.5
+                            step: 0.5,
+                            onEditingChanged: { editing in
+                                if !editing {
+                                    viewModel.noteOffsetSettled()
+                                }
+                            }
                         )
 
                         Text(String(format: "%+.1f mm", viewModel.horizontalOffsetMM))
@@ -269,6 +279,9 @@ struct ContentView: View {
             .padding(.top, 10)
         } label: {
             sectionLabel("Advanced", systemImage: "slider.horizontal.3")
+        }
+        .onChange(of: isAdvancedExpanded) { expanded in
+            UsageLog.ui("advanced", expanded ? "open" : "close")
         }
         .padding(.horizontal, 2)
     }
@@ -333,8 +346,14 @@ struct ContentView: View {
             RequirementsPanel(
                 viewModel: viewModel,
                 isExpanded: isChecklistExpanded,
-                onExpand: { isChecklistManuallyExpanded = true },
-                onCollapse: { isChecklistManuallyExpanded = false }
+                onExpand: {
+                    UsageLog.ui("checklist", "open")
+                    isChecklistManuallyExpanded = true
+                },
+                onCollapse: {
+                    UsageLog.ui("checklist", "close")
+                    isChecklistManuallyExpanded = false
+                }
             )
         }
     }
@@ -360,6 +379,7 @@ struct ContentView: View {
                 Spacer()
 
                 Button("Refresh") {
+                    UsageLog.ui("preview_refresh")
                     Task { await viewModel.loadPreview() }
                 }
                 .disabled(viewModel.selectedFileURL == nil || viewModel.isLoadingPreview)

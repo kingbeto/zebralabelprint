@@ -24,6 +24,11 @@ enum UsageLog {
         record("launch")
     }
 
+    /// A control the user actually touched. `value` is the choice (scope, size id, millimetres), never label text.
+    static func ui(_ control: String, _ value: String = "") {
+        record("ui", value.isEmpty ? ["control": control] : ["control": control, "value": value])
+    }
+
     static func line(event: String, fields: [String: String] = [:], at date: Date = Date()) -> String {
         var payload: [String: String] = ["t": iso.string(from: date), "e": event]
         for (key, value) in fields where !value.isEmpty {
