@@ -8,5 +8,12 @@ struct ZebraLabelPrintApp: App {
         }
         // wider form column; preview uses remaining window space at full size
         .defaultSize(width: 1640, height: 1040)
+        .commands {
+            CommandGroup(after: .help) {
+                Button("Reveal Usage Log") {
+                    UsageLog.reveal()
+                }
+            }
+        }
     }
 }

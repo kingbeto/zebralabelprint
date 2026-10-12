@@ -216,6 +216,7 @@ final class PrintViewModel: ObservableObject {
     }
 
     func onAppear() {
+        UsageLog.launch()
         refreshRequirements()
         guard !UserDefaults.standard.bool(forKey: hasCompletedFirstLaunchKey) else { return }
         UserDefaults.standard.set(true, forKey: hasCompletedFirstLaunchKey)
@@ -288,6 +289,7 @@ final class PrintViewModel: ObservableObject {
                 }
             }
 
+            UsageLog.record("setup", ["ok": "0", "queue": queueStatusCode])
             statusMessage = setupStatusSummaryAfterTimeout()
         }
     }
@@ -341,6 +343,15 @@ final class PrintViewModel: ObservableObject {
         selectedPrinter = ""
     }
 
+    private var queueStatusCode: String {
+        switch printerQueueStatus {
+        case .ready: return "ready"
+        case .offline: return "offline"
+        case .paused: return "paused"
+        case .unknown: return "unknown"
+        }
+    }
+
     private func setupStatusSummaryAfterTimeout() -> String {
         if isSetupChecklistComplete {
             return "Setup looks good."
@@ -358,10 +369,12 @@ final class PrintViewModel: ObservableObject {
     }
 
     func openZebraDriverGuide() {
+        UsageLog.record("help", ["which": "driver"])
         SetupLinks.openZebraDriverGuide()
     }
 
     func openPrinterSettings() {
+        UsageLog.record("help", ["which": "printers"])
         SetupLinks.openPrinterSettings()
     }
 
@@ -373,13 +386,16 @@ final class PrintViewModel: ObservableObject {
 
         switch CUPSPrinterService.restartCUPSScheduler() {
         case .success:
+            UsageLog.record("cups", ["ok": "1"])
             statusMessage = "CUPS restarted."
             refreshRequirements()
         case .failure(let error):
             if case CUPSPrinterService.AdminCommandError.cancelled = error {
+                UsageLog.record("cups", ["ok": "0", "why": "cancel"])
                 statusMessage = ""
                 return
             }
+            UsageLog.record("cups", ["ok": "0", "why": "fail"])
             errorMessage = error.localizedDescription
             showErrorAlert = true
         }
@@ -401,7 +417,9 @@ final class PrintViewModel: ObservableObject {
     func resumeSelectedPrinter() {
         guard !selectedPrinter.isEmpty else { return }
 
-        if CUPSPrinterService.resumePrinterQueue(selectedPrinter) {
+        let ok = CUPSPrinterService.resumePrinterQueue(selectedPrinter)
+        UsageLog.record("queue", ["action": "resume", "ok": ok ? "1" : "0"])
+        if ok {
             statusMessage = "Printer queue resumed."
             refreshRequirements()
         } else {
@@ -413,7 +431,9 @@ final class PrintViewModel: ObservableObject {
     func pauseSelectedPrinter() {
         guard !selectedPrinter.isEmpty else { return }
 
-        if CUPSPrinterService.pausePrinterQueue(selectedPrinter) {
+        let ok = CUPSPrinterService.pausePrinterQueue(selectedPrinter)
+        UsageLog.record("queue", ["action": "pause", "ok": ok ? "1" : "0"])
+        if ok {
             statusMessage = "Printer queue paused."
             refreshRequirements()
         } else {
@@ -425,7 +445,9 @@ final class PrintViewModel: ObservableObject {
     func cancelSelectedPrinterJobs() {
         guard !selectedPrinter.isEmpty else { return }
 
-        if CUPSPrinterService.cancelAllJobs(on: selectedPrinter) {
+        let ok = CUPSPrinterService.cancelAllJobs(on: selectedPrinter)
+        UsageLog.record("queue", ["action": "cancel", "ok": ok ? "1" : "0"])
+        if ok {
             statusMessage = "Queued jobs cancelled."
             refreshRequirements()
         } else {
@@ -551,6 +573,10 @@ final class PrintViewModel: ObservableObject {
         statusMessage = ""
         previewLabelNumber = 1
         refreshLabelsToPrintCount()
+        UsageLog.record("file", [
+            "ext": url.pathExtension.lowercased(),
+            "labels": "\(labelsToPrintCount)",
+        ])
         refreshRequirements()
         Task { await loadPreview() }
     }
@@ -622,6 +648,7 @@ final class PrintViewModel: ObservableObject {
         } catch {
             previewImages = []
             previewError = "Could not read file: \(error.localizedDescription)"
+            UsageLog.record("preview", ["ok": "0", "why": "read"])
             return
         }
 
@@ -629,6 +656,7 @@ final class PrintViewModel: ObservableObject {
             previewImages = []
             previewError = "The selected file is empty."
             labelsToPrintCount = 0
+            UsageLog.record("preview", ["ok": "0", "why": "empty"])
             return
         }
 
@@ -636,6 +664,7 @@ final class PrintViewModel: ObservableObject {
             previewImages = []
             previewError = "The ZPL file could not be read as text."
             labelsToPrintCount = 0
+            UsageLog.record("preview", ["ok": "0", "why": "text"])
             return
         }
 
@@ -675,11 +704,24 @@ final class PrintViewModel: ObservableObject {
             previewLabelInfo = ""
             previewLimitMessage = ""
             previewError = error.localizedDescription
+            UsageLog.record("preview", ["ok": "0", "why": Self.previewFailureCode(error)])
+        }
+    }
+
+    private static func previewFailureCode(_ error: Error) -> String {
+        guard let preview = error as? ZPLPreviewService.PreviewError else { return "other" }
+        switch preview {
+        case .invalidZPL: return "zpl"
+        case .invalidURL: return "url"
+        case .unexpectedResponse: return "response"
+        case .invalidImage: return "image"
+        case .apiError(let code, _): return "api_\(code)"
         }
     }
 
     func printFile() async {
         guard canPrint else {
+            UsageLog.record("print", ["ok": "0", "why": printBlockCode])
             errorMessage = printBlockedReason ?? "Complete the setup checklist before printing."
             showErrorAlert = true
             return
@@ -702,6 +744,7 @@ final class PrintViewModel: ObservableObject {
         // detached task — only the lpr subprocess (up to 30 s) runs off the main thread, so the UI
         // stays responsive while printing.
         guard let adjustedData = preparePrintData(from: fileURL, printer: printer) else {
+            UsageLog.record("print", ["ok": "0", "why": "prepare"])
             return
         }
 
@@ -717,6 +760,17 @@ final class PrintViewModel: ObservableObject {
 
         switch result {
         case .success(let submission):
+            UsageLog.record("print", [
+                "ok": "1",
+                "scope": printScope.rawValue,
+                "n": "\(lastPrintedLabelCount)",
+                "labels": "\(labelsToPrintCount)",
+                "size": selectedLabelSizeId,
+                "dpi": selectedResolutionId,
+                "offset": String(format: "%.1f", horizontalOffsetMM),
+                "zebra": Self.matchesZebra(printer) ? "1" : "0",
+                "paused": submission == .queuedWhilePaused ? "1" : "0",
+            ])
             refreshRequirements()
             switch submission {
             case .sent:
@@ -726,10 +780,19 @@ final class PrintViewModel: ObservableObject {
             }
             showSuccessAlert = true
         case .failure(let error):
+            UsageLog.record("print", ["ok": "0", "why": "cups"])
             errorMessage = error.localizedDescription
             statusMessage = ""
             showErrorAlert = true
         }
+    }
+
+    private var printBlockCode: String {
+        if selectedFileURL == nil { return "no_file" }
+        if labelsToPrintCount == 0 { return "no_labels" }
+        if case .failure = resolvedPrintIndices() { return "selection" }
+        let failed = requirements.filter { $0.blocksPrinting && $0.status != .passed }.map(\.id)
+        return failed.isEmpty ? "setup" : failed.joined(separator: ",")
     }
 
     /// Reads the file, applies the offset, and resolves the selected labels into print-ready bytes.
